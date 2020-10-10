@@ -68,7 +68,7 @@ def collect_incidents_from_pagerduty(session: requests.Session,
     response = session.get(
         "https://api.pagerduty.com/incidents",
         params={'since': start_date.isoformat(),
-                "until": end_date.isoformat(),
+                "until": end_date.isoformat(),  # until is exclusive
                 "service_ids[]": service_ids,
                 "statuses[]": "resolved",
                 "time_zone": "UTC",
@@ -179,10 +179,11 @@ def report_uptime(start_date: datetime, end_date: datetime, interval_incidents: 
     interval_uptime = (1 - (interval_downtime / interval_duration)) * 100
     interval_ids = list(itertools.chain.from_iterable(map(
         lambda inc: [inc.ids] if len(inc.ids) > 1 else inc.ids, interval_incidents)))
+    end_date_inclusive = end_date - relativedelta(seconds=1)
 
     logging.warning("From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Incidents: {}"
                     .format(start_date.isoformat(),
-                            end_date.isoformat(),
+                            end_date_inclusive.isoformat(),
                             interval_uptime,
                             len(interval_incidents),
                             str(timedelta(seconds=interval_downtime)),
@@ -190,10 +191,10 @@ def report_uptime(start_date: datetime, end_date: datetime, interval_incidents: 
                     )
 
 
-# Generate sub-intervals from start_date to end_date with relative_delta step.
+# Generate sub-intervals from start_date (inclusive) to end_date (exclusive) with relative_delta step.
 # Example: start_date=2019-01-01, end_date=2020-01-01, relative_delta=6months will return two sub-intervals:
-#          [2019-01-01, 2019-07-01)
-#          [2019-07-01, 2020-12-31)
+#          [2019-01-01 00:00:00, 2019-07-01 00:00:00)
+#          [2019-07-01 00:00:00, 2020-01-01 00:00:00)
 def intervals_gen(start_date: datetime, end_date: datetime, relative_delta: relativedelta) \
         -> Generator[Tuple[datetime, datetime], None, None]:
     interval_since = start_date
@@ -201,7 +202,7 @@ def intervals_gen(start_date: datetime, end_date: datetime, relative_delta: rela
         interval_until = interval_since + relative_delta
         if interval_until > end_date:
             interval_until = end_date
-        yield interval_since, interval_until - relativedelta(seconds=1)
+        yield interval_since, interval_until
         interval_since = interval_until
 
 
