@@ -10,11 +10,11 @@ Installation of required dependencies:
     pip3 install --user --upgrade -r requirements.txt
 
 Usage:
-    ./pagerduty-service-uptime.py --help
+    ./pagerduty_service_uptime.py --help
 
 Usage example:
     PAGERDUTY_API_TOKEN="some-key-11"
-    ./pagerduty-service-uptime.py \
+    ./pagerduty_service_uptime.py \
         --log-level WARN \
         --api-token "$PAGERDUTY_API_TOKEN" \
         --service-ids "https://some.pagerduty.com/services/ABCDEF4" \
