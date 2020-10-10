@@ -273,7 +273,7 @@ def main() -> int:
         dest="incidents_since",
         type=iso8601.parse_date,
         required=True,
-        help="beginning of the reported time range; "
+        help="beginning (inclusive) of the reported time range; "
              "iso8601 date, e.g. 2019-01-01T00:00:00Z")
     argparser.add_argument(
         "--incidents-until",
@@ -281,8 +281,8 @@ def main() -> int:
         dest="incidents_until",
         type=iso8601.parse_date,
         required=True,
-        help="end of the reported time range; "
-             "iso8601 date, e.g. 2019-11-30T23:59:59Z")
+        help="end (exclusive) of the reported time range; "
+             "iso8601 date, e.g. 2020-01-01T00:00:00Z")
     argparser.add_argument(
         "--report-step",
         metavar="STEP",

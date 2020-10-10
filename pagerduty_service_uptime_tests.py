@@ -88,5 +88,80 @@ class TestMergeTwoIncidents(unittest.TestCase):
         )
 
 
+class TestIntervalsGen(unittest.TestCase):
+
+    def test1(self):
+        intervals = list(intervals_gen(parse_date("2019-01-01 00:00:00"),
+                                       parse_date("2020-01-01 00:00:00"),
+                                       parse_relativedelta("6 months")))
+        self.assertListEqual(intervals, [
+            (parse_date("2019-01-01 00:00:00"), parse_date("2019-06-30 23:59:59")),
+            (parse_date("2019-07-01 00:00:00"), parse_date("2019-12-31 23:59:59")),
+        ])
+
+    def test2(self):
+        intervals = list(intervals_gen(parse_date("2019-01-01 00:00:00"),
+                                       parse_date("2019-12-31 23:59:59"),
+                                       parse_relativedelta("6 months")))
+        self.assertListEqual(intervals, [
+            (parse_date("2019-01-01 00:00:00"), parse_date("2019-06-30 23:59:59")),
+            (parse_date("2019-07-01 00:00:00"), parse_date("2019-12-31 23:59:58")),
+        ])
+
+    def test3(self):
+        intervals = list(intervals_gen(parse_date("2018-01-01 00:00:00"),
+                                       parse_date("2020-01-01 00:00:00"),
+                                       parse_relativedelta("1 year")))
+        self.assertListEqual(intervals, [
+            (parse_date("2018-01-01 00:00:00"), parse_date("2018-12-31 23:59:59")),
+            (parse_date("2019-01-01 00:00:00"), parse_date("2019-12-31 23:59:59")),
+        ])
+
+    def test4(self):
+        intervals = list(intervals_gen(parse_date("2018-01-01 00:00:00"),
+                                       parse_date("2019-01-01 00:00:00"),
+                                       parse_relativedelta("1 month")))
+        self.assertListEqual(intervals, [
+            (parse_date("2018-01-01 00:00:00"), parse_date("2018-01-31 23:59:59")),
+            (parse_date("2018-02-01 00:00:00"), parse_date("2018-02-28 23:59:59")),
+            (parse_date("2018-03-01 00:00:00"), parse_date("2018-03-31 23:59:59")),
+            (parse_date("2018-04-01 00:00:00"), parse_date("2018-04-30 23:59:59")),
+            (parse_date("2018-05-01 00:00:00"), parse_date("2018-05-31 23:59:59")),
+            (parse_date("2018-06-01 00:00:00"), parse_date("2018-06-30 23:59:59")),
+            (parse_date("2018-07-01 00:00:00"), parse_date("2018-07-31 23:59:59")),
+            (parse_date("2018-08-01 00:00:00"), parse_date("2018-08-31 23:59:59")),
+            (parse_date("2018-09-01 00:00:00"), parse_date("2018-09-30 23:59:59")),
+            (parse_date("2018-10-01 00:00:00"), parse_date("2018-10-31 23:59:59")),
+            (parse_date("2018-11-01 00:00:00"), parse_date("2018-11-30 23:59:59")),
+            (parse_date("2018-12-01 00:00:00"), parse_date("2018-12-31 23:59:59")),
+        ])
+
+    def test5(self):
+        intervals = list(intervals_gen(parse_date("2018-01-01 10:00:05"),
+                                       parse_date("2019-01-01 00:00:00"),
+                                       parse_relativedelta("1 month")))
+        self.assertListEqual(intervals, [
+            (parse_date("2018-01-01 10:00:05"), parse_date("2018-02-01 10:00:04")),
+            (parse_date("2018-02-01 10:00:05"), parse_date("2018-03-01 10:00:04")),
+            (parse_date("2018-03-01 10:00:05"), parse_date("2018-04-01 10:00:04")),
+            (parse_date("2018-04-01 10:00:05"), parse_date("2018-05-01 10:00:04")),
+            (parse_date("2018-05-01 10:00:05"), parse_date("2018-06-01 10:00:04")),
+            (parse_date("2018-06-01 10:00:05"), parse_date("2018-07-01 10:00:04")),
+            (parse_date("2018-07-01 10:00:05"), parse_date("2018-08-01 10:00:04")),
+            (parse_date("2018-08-01 10:00:05"), parse_date("2018-09-01 10:00:04")),
+            (parse_date("2018-09-01 10:00:05"), parse_date("2018-10-01 10:00:04")),
+            (parse_date("2018-10-01 10:00:05"), parse_date("2018-11-01 10:00:04")),
+            (parse_date("2018-11-01 10:00:05"), parse_date("2018-12-01 10:00:04")),
+            (parse_date("2018-12-01 10:00:05"), parse_date("2018-12-31 23:59:59")),
+        ])
+
+    def test6(self):
+        intervals = list(intervals_gen(parse_date("2019-01-01 00:00:00"),
+                                       parse_date("2020-01-01 00:00:00"),
+                                       parse_relativedelta("15 months")))
+        self.assertListEqual(intervals, [
+            (parse_date("2019-01-01 00:00:00"), parse_date("2019-12-31 23:59:59")),
+        ])
+
 if __name__ == '__main__':
     unittest.main()
