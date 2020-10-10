@@ -1,7 +1,7 @@
 What is this:
     pagerduty-service-uptime
-    The script calculates the "uptime" of the system, based on incidents in PagerDuty.
-    It allows to indicate which incidents are considered as downtime and affect the calculation of uptime.
+    Calculates system uptime based on incidents in PagerDuty.
+    Allows to indicate which incidents are considered as downtime and affect the calculation of uptime.
 
 Installation of required packages (Debian-based Linux):
     sudo apt-get install python3 python3-pip
