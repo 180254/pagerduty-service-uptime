@@ -177,7 +177,8 @@ def report_uptime(start_date: datetime, end_date: datetime, interval_incidents: 
     interval_duration = (end_date - start_date).total_seconds()
     interval_downtime = sum(map(lambda inc: inc.total_seconds(), interval_incidents))
     interval_uptime = (1 - (interval_downtime / interval_duration)) * 100
-    interval_ids = list(itertools.chain.from_iterable(map(lambda inc: inc.ids, interval_incidents)))
+    interval_ids = list(itertools.chain.from_iterable(map(
+        lambda inc: [inc.ids] if len(inc.ids) > 1 else inc.ids, interval_incidents)))
 
     logging.warning("From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Incidents: {}"
                     .format(start_date.isoformat(),
