@@ -163,5 +163,32 @@ class TestIntervalsGen(unittest.TestCase):
             (parse_date("2019-01-01 00:00:00"), parse_date("2019-12-31 23:59:59")),
         ])
 
+
+class MergeOverlappingIncidents(unittest.TestCase):
+
+    def test1(self):
+        merged_incidents = merge_overlapping_incidents([
+            Incident([1], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
+            Incident([2], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 11:00:01')),
+            Incident([3], parse_date('2020-10-01 11:00:01'), parse_date('2020-10-01 11:00:02')),
+            Incident([4], parse_date('2020-10-01 12:00:00'), parse_date('2020-10-01 12:00:05')),
+            Incident([5], parse_date('2020-10-01 12:00:06'), parse_date('2020-10-01 13:00:00')),
+            Incident([6], parse_date('2020-10-01 12:00:07'), parse_date('2020-10-01 12:30:00')),
+            Incident([7], parse_date('2020-10-01 13:00:00'), parse_date('2020-10-01 13:00:00')),
+            Incident([8], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:00:01')),
+            Incident([9], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:10:10')),
+            Incident([10], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:05:00')),
+            Incident([11], parse_date('2020-10-01 15:00:00'), parse_date('2020-10-01 15:05:00')),
+            Incident([12], parse_date('2020-10-01 15:01:00'), parse_date('2020-10-01 15:01:05')),
+        ])
+        self.assertListEqual(merged_incidents, [
+            Incident([1, 2, 3], parse_date("2020-10-01 10:00:00"), parse_date("2020-10-01 11:00:02")),
+            Incident([4], parse_date("2020-10-01 12:00:00"), parse_date("2020-10-01 12:00:05")),
+            Incident([5, 6, 7], parse_date("2020-10-01 12:00:06"), parse_date("2020-10-01 13:00:00")),
+            Incident([8, 9, 10], parse_date("2020-10-01 14:00:00"), parse_date("2020-10-01 14:10:10")),
+            Incident([11, 12], parse_date("2020-10-01 15:00:00"), parse_date("2020-10-01 15:05:00"))
+        ])
+
+
 if __name__ == '__main__':
     unittest.main()
