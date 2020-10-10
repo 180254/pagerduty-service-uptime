@@ -1,7 +1,9 @@
 What is this:
     pagerduty-service-uptime
+    The script calculates the "uptime" of the system, based on incidents in PagerDuty.
+    It allows to indicate which incidents are considered as downtime and affect the calculation of uptime.
 
-Installation of required packages:
+Installation of required packages (Debian-based Linux):
     sudo apt-get install python3 python3-pip
 
 Installation of required dependencies:
@@ -15,7 +17,8 @@ Usage example:
     ./pagerduty-service-uptime.py \
         --log-level WARN \
         --api-token "$PAGERDUTY_API_TOKEN" \
-        --service-id "https://some.pagerduty.com/services/ABCDEF4" \
+        --service-ids "https://some.pagerduty.com/services/ABCDEF4" \
+        --title_checks "^Downtime"
         --incidents-since "2019-01-01T00:00:00Z" \
         --incidents-until "2020-01-01T00:00:00Z" \
         --report-step "1 month"
