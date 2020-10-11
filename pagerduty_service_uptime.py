@@ -15,6 +15,7 @@ from typing import List, Pattern, AnyStr, Optional, Generator, Tuple, Union, Dic
 import requests
 from dateutil.parser import parse as parse_date
 from dateutil.relativedelta import relativedelta
+from diskcache import Cache
 
 VERSION = "3.0.0"
 
@@ -131,9 +132,17 @@ def call_pagerduty_list_incidents(session: requests.Session,
 
 
 # https://developer.pagerduty.com/api-reference/reference/REST/openapiv3.json/paths/~1incidents~1%7Bid%7D~1alerts/get
-def call_pagerduty_list_alerts_for_an_incident(session: requests.Session,
+def call_pagerduty_list_alerts_for_an_incident(cache: Cache,
+                                               session: requests.Session,
                                                api_token: str,
                                                incident_id: str) -> List[Alert]:
+    # Method result are considered stable and cached on disk.
+    # Script is processing only resolved incidents.
+    cache_item_id = f"alerts_for_an_incident-{incident_id}"
+
+    if cache.__contains__(cache_item_id):
+        return cache.get(cache_item_id)
+
     api_alerts = call_pagerduty_api(
         f"https://api.pagerduty.com/incidents/{incident_id}/alerts",
         session,
@@ -152,6 +161,7 @@ def call_pagerduty_list_alerts_for_an_incident(session: requests.Session,
                           parse_date(api_alert["resolved_at"])),
                       api_alerts))
 
+    cache.set(cache_item_id, alerts)
     return alerts
 
 
@@ -370,16 +380,17 @@ def main() -> int:
     original_alerts: List[Alert] = []
     simplified_alerts: List[Alert] = []
     alerts_futures: List[Future[List[Alert]]] = []
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        with requests.Session() as requests_session:
-            for incident_id in incidents:
-                future = executor.submit(
-                    call_pagerduty_list_alerts_for_an_incident, requests_session, args.api_token,
-                    incident_id)
-                alerts_futures.append(future)
+    with ThreadPoolExecutor(max_workers=8) as executor, \
+            Cache(".cache") as cache, \
+            requests.Session() as requests_session:
+        for incident_id in incidents:
+            future = executor.submit(
+                call_pagerduty_list_alerts_for_an_incident, cache, requests_session, args.api_token, incident_id)
+            alerts_futures.append(future)
 
         for alerts_future in futures.as_completed(alerts_futures):
             index = alerts_futures.index(alerts_future)
+            incident_id = incidents[index]
             collected_alerts = alerts_future.result()
             collected_alerts.sort(key=lambda item: (item.created, -item.total_seconds()))
 
@@ -387,7 +398,7 @@ def main() -> int:
             # If all alerts overlap, then simplify the id.
             merged_collected_alerts = merge_overlapping_alerts(collected_alerts)
             if len(merged_collected_alerts) == 1:
-                merged_collected_alerts[0].ids = [incidents[index]]
+                merged_collected_alerts[0].ids = [incident_id]
             simplified_alerts.extend(merged_collected_alerts)
 
             # Keep also "original" alerts - just for logs and debugging.
