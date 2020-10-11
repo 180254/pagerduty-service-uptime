@@ -18,7 +18,7 @@ Usage example:
         --log-level WARN \
         --api-token "$PAGERDUTY_API_TOKEN" \
         --service-ids "https://some.pagerduty.com/services/ABCDEF4" \
-        --title_checks "^Downtime"
+        --title-checks "^Downtime"
         --incidents-since "2019-01-01T00:00:00Z" \
         --incidents-until "2020-01-01T00:00:00Z" \
         --report-step "1 month"
