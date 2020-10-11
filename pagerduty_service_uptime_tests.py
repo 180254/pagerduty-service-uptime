@@ -237,7 +237,7 @@ class TestMergeOverlappingAlerts(unittest.TestCase):
 
 class TestFilterAlerts(unittest.TestCase):
 
-    def test_some_alert_matches(self):
+    def test_some_alert_matches_in_the_middle(self):
         filtered_alerts = filter_alerts(
             parse_date("2020-01-01 00:00:05"),
             parse_date("2020-03-03 10:00:05"),
@@ -262,6 +262,46 @@ class TestFilterAlerts(unittest.TestCase):
             Alert([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
             Alert([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35")),
             Alert([10], parse_date("2020-03-03 10:00:04"), parse_date("2020-03-03 17:00:35"))
+        ])
+
+    def test_some_alert_matches_from_the_beginning_to_the_middle(self):
+        filtered_alerts = filter_alerts(
+            parse_date("2020-01-01 00:00:05"),
+            parse_date("2020-03-03 10:00:05"),
+            [
+                Alert([4, 5], parse_date("2020-01-01 00:00:05"), parse_date("2020-02-01 00:00:00")),
+                Alert([6], parse_date("2020-01-01 00:00:06"), parse_date("2020-02-01 00:00:00")),
+                Alert([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
+                Alert([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35")),
+                Alert([10], parse_date("2020-03-03 16:00:04"), parse_date("2020-03-03 17:00:35")),
+            ])
+        self.assertListEqual(filtered_alerts, [
+            Alert([4, 5], parse_date("2020-01-01 00:00:05"), parse_date("2020-02-01 00:00:00")),
+            Alert([6], parse_date("2020-01-01 00:00:06"), parse_date("2020-02-01 00:00:00")),
+            Alert([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
+            Alert([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35"))
+        ])
+
+    def test_some_alert_matches_from_the_middle_to_the_end(self):
+        filtered_alerts = filter_alerts(
+            parse_date("2020-01-01 00:00:05"),
+            parse_date("2020-03-03 10:00:05"),
+            [
+                Alert([1, 2], parse_date("2019-01-12 10:00:00"), parse_date("2019-01-13 11:00:02")),
+                Alert([3], parse_date("2020-01-01 00:00:04"), parse_date("2020-02-01 00:00:00")),
+                Alert([4, 5], parse_date("2020-01-01 00:00:05"), parse_date("2020-02-01 00:00:00")),
+                Alert([6], parse_date("2020-01-01 00:00:06"), parse_date("2020-02-01 00:00:00")),
+                Alert([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
+                Alert([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35")),
+                Alert([11], parse_date("2020-03-03 10:00:04"), parse_date("2020-03-03 17:00:35"))
+
+            ])
+        self.assertListEqual(filtered_alerts, [
+            Alert([4, 5], parse_date("2020-01-01 00:00:05"), parse_date("2020-02-01 00:00:00")),
+            Alert([6], parse_date("2020-01-01 00:00:06"), parse_date("2020-02-01 00:00:00")),
+            Alert([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
+            Alert([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35")),
+            Alert([11], parse_date("2020-03-03 10:00:04"), parse_date("2020-03-03 17:00:35"))
         ])
 
     def test_all_alerts_matches(self):
