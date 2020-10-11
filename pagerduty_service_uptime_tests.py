@@ -2,8 +2,6 @@
 
 import unittest
 
-from iso8601 import parse_date
-
 from pagerduty_service_uptime import *
 
 
@@ -205,7 +203,6 @@ class TestMergeOverlappingIncidents(unittest.TestCase):
             Incident([11], parse_date('2020-10-01 15:00:00'), parse_date('2020-10-01 15:05:00')),
             Incident([12], parse_date('2020-10-01 15:01:00'), parse_date('2020-10-01 15:01:05')),
             Incident([13], parse_date('2020-10-01 15:01:00'), parse_date('2020-10-01 15:01:06')),
-
         ])
         self.assertListEqual(merged_incidents, [
             Incident([1, 2, 3], parse_date("2020-10-01 10:00:00"), parse_date("2020-10-01 11:00:02")),

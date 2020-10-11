@@ -10,8 +10,8 @@ import time
 from datetime import datetime, timedelta
 from typing import List, Pattern, AnyStr, Optional, Generator, Tuple
 
-import iso8601
 import requests
+from dateutil.parser import parse as parse_date
 from dateutil.relativedelta import relativedelta
 
 
@@ -103,8 +103,8 @@ def collect_incidents_from_pagerduty(session: requests.Session,
             continue
         logging.debug("incident accepted: {} {}".format(incident_id, title))
 
-        created_at = iso8601.parse_date(api_incident["created_at"])
-        last_status_change_at = iso8601.parse_date(api_incident["last_status_change_at"])
+        created_at = parse_date(api_incident["created_at"])
+        last_status_change_at = parse_date(api_incident["last_status_change_at"])
         incidents.append(Incident([incident_id], created_at, last_status_change_at))
 
     # https://v2.developer.pagerduty.com/docs/pagination
@@ -273,7 +273,7 @@ def main() -> int:
         "--incidents-since",
         metavar="ISODATE",
         dest="incidents_since",
-        type=iso8601.parse_date,
+        type=parse_date,
         required=True,
         help="beginning (inclusive) of the reported time range; "
              "iso8601 date, e.g. 2019-01-01T00:00:00Z")
@@ -281,7 +281,7 @@ def main() -> int:
         "--incidents-until",
         metavar="ISODATE",
         dest="incidents_until",
-        type=iso8601.parse_date,
+        type=parse_date,
         required=True,
         help="end (exclusive) of the reported time range; "
              "iso8601 date, e.g. 2020-01-01T00:00:00Z")
