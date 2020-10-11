@@ -310,7 +310,7 @@ def main() -> int:
         dest="log_level",
         type=str,
         required=True,
-        help="one of CRITICAL, ERROR, WARN, INFO, DEBUG")
+        help="one of CRITICAL, ERROR, WARN, INFO, DEBUG, NOTSET")
     argparser.add_argument(
         "--api-token",
         metavar="APITOKEN",
@@ -378,7 +378,7 @@ def main() -> int:
     args = argparser.parse_args()
 
     # logging
-    logging.basicConfig(stream=sys.stdout, level=args.log_level, format="%(message)s")
+    logging.basicConfig(stream=sys.stdout, level=args.log_level, format="%(levelname)s %(message)s")
     logging.info("log_level={}".format(logging.getLevelName(args.log_level)))
     logging.info("api_token={}...".format(args.api_token[:3]))
     logging.info("service_ids={}".format(args.service_ids))
