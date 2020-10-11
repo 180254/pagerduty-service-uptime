@@ -6,6 +6,9 @@ import logging
 import re
 import sys
 import time
+from concurrent import futures
+from concurrent.futures import Future
+from concurrent.futures.thread import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import List, Pattern, AnyStr, Optional, Generator, Tuple, Union, Dict
 
@@ -216,7 +219,7 @@ def report_uptime(start_date: datetime, end_date: datetime, interval_alerts: Lis
         lambda inc: [inc.ids] if len(inc.ids) > 1 else inc.ids, interval_alerts)))
     end_date_inclusive = end_date - relativedelta(seconds=1)
 
-    logging.warning("From: {} To: {} Uptime: {:6.2f} Alerts: {:3} Downtime: {: >8} Alerts: {}"
+    logging.warning("From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Incidents: {}"
                     .format(start_date.isoformat(),
                             end_date_inclusive.isoformat(),
                             interval_uptime,
@@ -353,7 +356,7 @@ def main() -> int:
     logging.info("incidents_until={}".format(args.incidents_until))
     logging.info("report_step={}".format(args.report_step))
 
-    # main logic
+    # collect incidents
     incidents: List[str] = []
     with requests.Session() as requests_session:
         collect_step = relativedelta(months=4)
@@ -362,25 +365,41 @@ def main() -> int:
                 call_pagerduty_list_incidents(requests_session, args.api_token, args.service_ids, args.title_checks,
                                               interval_since, interval_until)
             incidents.extend(collected_incidents)
-    logging.info("len(incidents)={}".format(len(incidents)))
 
-    alerts: List[Alert] = []
+    # collect alerts
+    original_alerts: List[Alert] = []
     simplified_alerts: List[Alert] = []
-    with requests.Session() as requests_session:
-        for incident_id in incidents:
-            collected_alerts = call_pagerduty_list_alerts_for_an_incident(requests_session, args.api_token, incident_id)
+    alerts_futures: List[Future[List[Alert]]] = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        with requests.Session() as requests_session:
+            for incident_id in incidents:
+                future = executor.submit(
+                    call_pagerduty_list_alerts_for_an_incident, requests_session, args.api_token,
+                    incident_id)
+                alerts_futures.append(future)
+
+        for alerts_future in futures.as_completed(alerts_futures):
+            index = alerts_futures.index(alerts_future)
+            collected_alerts = alerts_future.result()
+            collected_alerts.sort(key=lambda item: (item.created, -item.total_seconds()))
+
             # Simplify alerts - merge overlapping alerts for one incident.
             # If all alerts overlap, then simplify the id.
             merged_collected_alerts = merge_overlapping_alerts(collected_alerts)
             if len(merged_collected_alerts) == 1:
-                merged_collected_alerts[0].ids = [incident_id]
-            alerts.extend(collected_alerts)
+                merged_collected_alerts[0].ids = [incidents[index]]
             simplified_alerts.extend(merged_collected_alerts)
-    simplified_alerts.sort(key=lambda inc: (inc.created, -inc.total_seconds()))
-    logging.info("len(alerts)={}".format(len(alerts)))
-    logging.info("len(simplified_alerts)={}".format(len(simplified_alerts)))
 
+            # Keep also "original" alerts - just for logs and debugging.
+            original_alerts.extend(collected_alerts)
+
+    simplified_alerts.sort(key=lambda item: (item.created, -item.total_seconds()))
     merged_alerts = merge_overlapping_alerts(simplified_alerts)
+
+    logging.info("len(incidents)={}".format(len(incidents)))
+    logging.debug("incidents={}".format(str(incidents)))
+    logging.info("len(original_alerts)={}".format(len(original_alerts)))
+    logging.info("len(simplified_alerts)={}".format(len(simplified_alerts)))
     logging.info("len(merged_alerts)={}".format(len(merged_alerts)))
     logging.debug("merged_alerts={}".format(str(merged_alerts)))
 
