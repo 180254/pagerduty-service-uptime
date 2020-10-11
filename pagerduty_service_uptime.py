@@ -1,46 +1,229 @@
 #!/usr/bin/env python3
 
 import argparse
-import functools
 import itertools
 import logging
 import re
 import sys
 import time
 from datetime import datetime, timedelta
-from typing import List, Pattern, AnyStr, Optional, Generator, Tuple
+from typing import List, Pattern, AnyStr, Optional, Generator, Tuple, Union, Dict
 
 import requests
 from dateutil.parser import parse as parse_date
 from dateutil.relativedelta import relativedelta
 
+VERSION = "3.0.0"
 
-class Incident:
-    def __init__(self, ids, created, resolved):
-        self.ids = ids[:]
-        self.created = created
-        self.resolved = resolved
 
-    @functools.lru_cache(maxsize=1024)
+class Alert:
+    def __init__(self, ids: List[Union[int, str]], created: datetime, resolved: datetime):
+        self.ids: List[Union[int, str]] = ids[:]
+        self.created: datetime = created
+        self.resolved: datetime = resolved
+
+    def total_seconds(self):
+        return (self.resolved - self.created).total_seconds()
+
     def __str__(self):
-        return "({},{},{})".format(self.ids, self.created.isoformat(), self.resolved.isoformat())
+        return f"({self.ids},{self.created.isoformat()},{self.resolved.isoformat()})"
 
     def __repr__(self):
         return self.__str__()
-
-    @functools.lru_cache(maxsize=1024)
-    def total_seconds(self):
-        return (self.resolved - self.created).total_seconds()
 
     def __hash__(self) -> int:
         return hash((tuple(self.ids), self.created, self.resolved))
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, Incident):
+        if isinstance(other, Alert):
             return self.ids == other.ids \
                    and self.created == other.created \
                    and self.resolved == other.resolved
         return False
+
+
+# Call PageDuty API.
+# Handles repeating errors and pagination.
+# Extracts all items for a given collector_key.
+def call_pagerduty_api(call_id,
+                       session: requests.Session,
+                       api_token: str,
+                       url: str,
+                       params: Dict,
+                       collector_key: str,
+                       offset: int = 0,
+                       retry: int = 0) -> List[Dict]:
+    logging.info(f"call_pagerduty_api({call_id},{offset},{retry})")
+
+    response = None
+    try:
+        params_with_pagination = {**params, "limit": 100, "offset": offset}
+        headers = {
+            "Accept": "application/vnd.pagerduty+json;version=2",
+            "Authorization": f"Token token={api_token}"
+        }
+
+        response = session.get(url, params=params_with_pagination, headers=headers)
+
+        if response.status_code != 200:
+            if retry < 3:
+                logging.info(f"response.status_code is {response.status_code}, != 200, repeating")
+                # https://v2.developer.pagerduty.com/docs/rate-limiting
+                if response.status_code == 429:
+                    time.sleep(1)
+                return call_pagerduty_api(call_id, session, api_token, url, params, collector_key, offset, retry + 1)
+            raise requests.HTTPError(f"response.status_code is {response.status_code}, != 200")
+
+        result = []
+        api_response = response.json()
+        result.extend(api_response[collector_key])
+
+        # https://v2.developer.pagerduty.com/docs/pagination
+        if api_response["more"]:
+            next_offset = api_response["offset"] + len(api_response[collector_key])
+            more_results = call_pagerduty_api(call_id, session, api_token, url, params, collector_key, next_offset, 0)
+            result.extend(more_results)
+
+        return result
+    finally:
+        if response is not None:
+            response.close()
+
+
+# https://developer.pagerduty.com/api-reference/reference/REST/openapiv3.json/paths/~1incidents/get
+def call_pagerduty_list_incidents(session: requests.Session,
+                                  api_token: str,
+                                  service_ids: List[str],
+                                  title_checks: Optional[List[Pattern[AnyStr]]],
+                                  start_date: datetime,
+                                  end_date: datetime) -> List[str]:
+    api_incidents = call_pagerduty_api(
+        f"https://api.pagerduty.com/incidents,since={start_date.isoformat()},until={end_date.isoformat()}",
+        session,
+        api_token,
+        "https://api.pagerduty.com/incidents",
+        {
+            "since": start_date.isoformat(),
+            "until": end_date.isoformat(),  # until is exclusive
+            "service_ids[]": service_ids,
+            "statuses[]": "resolved",
+            "time_zone": "UTC",
+            "sort_by": "created_at",
+        },
+        "incidents")
+
+    incidents = []
+    for api_incident in api_incidents:
+        incident_id = api_incident["id"]
+
+        incident_title = api_incident["title"].replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
+        if not is_outage(title_checks, incident_title):
+            logging.debug("incident rejected: {} {}".format(incident_id, incident_title))
+            continue
+        logging.debug("incident accepted: {} {}".format(incident_id, incident_title))
+
+        incidents.append(incident_id)
+
+    return incidents
+
+
+# https://developer.pagerduty.com/api-reference/reference/REST/openapiv3.json/paths/~1incidents~1%7Bid%7D~1alerts/get
+def call_pagerduty_list_alerts_for_an_incident(session: requests.Session,
+                                               api_token: str,
+                                               incident_id: str) -> List[Alert]:
+    api_alerts = call_pagerduty_api(
+        f"https://api.pagerduty.com/incidents/{incident_id}/alerts",
+        session,
+        api_token,
+        f"https://api.pagerduty.com/incidents/{incident_id}/alerts",
+        {
+            "statuses[]": "resolved",
+            "time_zone": "UTC"
+        },
+        "alerts")
+
+    alerts = list(map(lambda api_alert:
+                      Alert(
+                          [f"{incident_id}/{api_alert['id']}"],
+                          parse_date(api_alert["created_at"]),
+                          parse_date(api_alert["resolved_at"])),
+                      api_alerts))
+
+    return alerts
+
+
+# Find all alerts which overlap, and merge them.
+# The resulting list includes only unique alerts that times do not overlap.
+# Note: "alerts" array must be sorted by "created asc".
+def merge_overlapping_alerts(alerts: List[Alert]) -> List[Alert]:
+    ret = alerts[:]
+    performed_any_merge = True
+    while performed_any_merge:
+        performed_any_merge = False
+        for i in range(len(ret) - 1, 0, -1):
+            if alerts_overlap(ret[i - 1], ret[i]):
+                ret[i - 1] = merge_two_alerts(ret[i - 1], ret[i])
+                ret.pop(i)
+                performed_any_merge = True
+
+    # Above algorithm should works. Lets check.
+    for i in range(len(ret)):
+        for j in range(len(ret)):
+            if i != j and alerts_overlap(ret[i], ret[j]):
+                raise AssertionError("Omg. {} and {} ({} and {}) overlaps! It's script bug."
+                                     .format(i, j, ret[i], ret[j]))
+    return ret
+
+
+# Function checks whether two alerts overlap.
+# Math: https://nedbatchelder.com/blog/201310/range_overlap_in_two_compares.html
+def alerts_overlap(alert_a: Alert, alert_b: Alert) -> bool:
+    return alert_a.resolved >= alert_b.created and alert_b.resolved >= alert_a.created
+
+
+# "Merge" means interval of new alert is union of intervals of two input *overlapping* alerts.
+def merge_two_alerts(alert_a: Alert, alert_b: Alert) -> Alert:
+    logging.debug("merge_two_alerts({},{})".format(alert_a, alert_b))
+    new_ids = alert_a.ids + alert_b.ids
+    new_created = min(alert_a.created, alert_b.created)
+    new_resolved = max(alert_a.resolved, alert_b.resolved)
+    new_alert = Alert(new_ids, new_created, new_resolved)
+    return new_alert
+
+
+# Filter alerts, return the ones in the interval [start_date, end_date).
+# Note: Alert "created" date is compared.
+def filter_alerts(start_date: datetime, end_date: datetime, all_alerts: List[Alert]) -> List[Alert]:
+    try:
+        first_matching_index = next(i for i, v in enumerate(all_alerts) if v.created >= start_date)
+    except StopIteration:
+        first_matching_index = len(all_alerts)
+    try:
+        first_mismatched_index = next(i for i, v in enumerate(all_alerts) if v.created >= end_date)
+    except StopIteration:
+        first_mismatched_index = len(all_alerts)
+
+    interval_alerts = all_alerts[first_matching_index:first_mismatched_index]
+    return interval_alerts
+
+
+# Print final report about uptime.
+def report_uptime(start_date: datetime, end_date: datetime, interval_alerts: List[Alert]) -> type(None):
+    interval_duration = (end_date - start_date).total_seconds()
+    interval_downtime = sum(map(lambda inc: inc.total_seconds(), interval_alerts))
+    interval_uptime = (1 - (interval_downtime / interval_duration)) * 100
+    interval_ids = list(itertools.chain.from_iterable(map(
+        lambda inc: [inc.ids] if len(inc.ids) > 1 else inc.ids, interval_alerts)))
+    end_date_inclusive = end_date - relativedelta(seconds=1)
+
+    logging.warning("From: {} To: {} Uptime: {:6.2f} Alerts: {:3} Downtime: {: >8} Alerts: {}"
+                    .format(start_date.isoformat(),
+                            end_date_inclusive.isoformat(),
+                            interval_uptime,
+                            len(interval_alerts),
+                            str(timedelta(seconds=interval_downtime)),
+                            interval_ids)
+                    )
 
 
 # Function that checks if an incident indicates a service outage.
@@ -52,143 +235,6 @@ def is_outage(title_checks: Optional[List[Pattern[AnyStr]]], title: str) -> bool
         if re.search(title_check, title):
             return True
     return False
-
-
-# https://api-reference.pagerduty.com/#!/Incidents/get_incidents
-def collect_incidents_from_pagerduty(session: requests.Session,
-                                     api_token: str,
-                                     service_ids: List[str],
-                                     title_checks: Optional[List[Pattern[AnyStr]]],
-                                     start_date: datetime,
-                                     end_date: datetime,
-                                     offset: int = 0) -> List[Incident]:
-    logging.info("collect_incidents_from_pagerduty({},{},{})"
-                 .format(start_date.isoformat(), end_date.isoformat(), offset))
-
-    response = session.get(
-        "https://api.pagerduty.com/incidents",
-        params={'since': start_date.isoformat(),
-                "until": end_date.isoformat(),  # until is exclusive
-                "service_ids[]": service_ids,
-                "statuses[]": "resolved",
-                "time_zone": "UTC",
-                "sort_by": "created_at",
-                "limit": 100,
-                "offset": offset},
-        headers={"Accept": "application/vnd.pagerduty+json;version=2",
-                 "Authorization": "Token token={}".format(api_token)})
-
-    # https://v2.developer.pagerduty.com/docs/rate-limiting
-    if response.status_code == 429:
-        response.close()
-        logging.info("request has been throttled, sleeping 1 second.")
-        time.sleep(1)
-        return collect_incidents_from_pagerduty(
-            session, api_token, service_ids, title_checks, start_date, end_date, offset)
-
-    if response.status_code != 200:
-        response.close()
-        raise requests.HTTPError("response.status_code is {}, != 200".format(response.status_code))
-
-    api_response = response.json()
-    response.close()
-
-    incidents = []
-    for api_incident in api_response["incidents"]:
-        incident_id = api_incident["id"]
-
-        title = api_incident["title"].replace('\r', '').replace('\n', ' ')
-        if not is_outage(title_checks, title):
-            logging.debug("incident rejected: {} {}".format(incident_id, title))
-            continue
-        logging.debug("incident accepted: {} {}".format(incident_id, title))
-
-        created_at = parse_date(api_incident["created_at"])
-        last_status_change_at = parse_date(api_incident["last_status_change_at"])
-        incidents.append(Incident([incident_id], created_at, last_status_change_at))
-
-    # https://v2.developer.pagerduty.com/docs/pagination
-    if api_response["more"]:
-        next_offset = api_response["offset"] + len(api_response["incidents"])
-        more_incidents = collect_incidents_from_pagerduty(
-            session, api_token, service_ids, title_checks, start_date, end_date, next_offset)
-        incidents.extend(more_incidents)
-
-    return incidents
-
-
-# Find all incidents which overlap, and merge them.
-# The resulting list includes only unique incidents that times do not overlap.
-# Note: "incidents" array must be sorted by "created asc".
-def merge_overlapping_incidents(incidents: List[Incident]) -> List[Incident]:
-    ret = incidents[:]
-    performed_any_merge = True
-    while performed_any_merge:
-        performed_any_merge = False
-        for i in range(len(ret) - 1, 0, -1):
-            if incidents_overlap(ret[i - 1], ret[i]):
-                ret[i - 1] = merge_two_incidents(ret[i - 1], ret[i])
-                ret.pop(i)
-                performed_any_merge = True
-
-    # Above algorithm should works. Lets check it ;)
-    for i in range(len(ret)):
-        for j in range(len(ret)):
-            if i != j and incidents_overlap(ret[i], ret[j]):
-                raise AssertionError("Omg. {} and {} ({} and {}) overlaps! It's script bug."
-                                     .format(i, j, ret[i], ret[j]))
-    return ret
-
-
-# Function checks whether two incidents overlap.
-# Math: https://nedbatchelder.com/blog/201310/range_overlap_in_two_compares.html
-def incidents_overlap(incident_a: Incident, incident_b: Incident) -> bool:
-    return incident_a.resolved >= incident_b.created and incident_b.resolved >= incident_a.created
-
-
-# "Merge" means interval of new incident is union of intervals of two input *overlapping* incidents.
-def merge_two_incidents(incident_a: Incident, incident_b: Incident) -> Incident:
-    logging.debug("merge_incidents({},{})".format(incident_a, incident_b))
-    new_ids = incident_a.ids + incident_b.ids
-    new_created = min(incident_a.created, incident_b.created)
-    new_resolved = max(incident_a.resolved, incident_b.resolved)
-    new_incident = Incident(new_ids, new_created, new_resolved)
-    return new_incident
-
-
-# Filter incidents, return the ones in the interval [start_date, end_date).
-# Note: Incident "created" date is compared.
-def filter_incidents(start_date: datetime, end_date: datetime, all_incidents: List[Incident]) -> List[Incident]:
-    try:
-        first_matching_index = next(i for i, v in enumerate(all_incidents) if v.created >= start_date)
-    except StopIteration:
-        first_matching_index = len(all_incidents)
-    try:
-        first_mismatched_index = next(i for i, v in enumerate(all_incidents) if v.created >= end_date)
-    except StopIteration:
-        first_mismatched_index = len(all_incidents)
-
-    interval_incidents = all_incidents[first_matching_index:first_mismatched_index]
-    return interval_incidents
-
-
-# Print final report about uptime.
-def report_uptime(start_date: datetime, end_date: datetime, interval_incidents: List[Incident]) -> type(None):
-    interval_duration = (end_date - start_date).total_seconds()
-    interval_downtime = sum(map(lambda inc: inc.total_seconds(), interval_incidents))
-    interval_uptime = (1 - (interval_downtime / interval_duration)) * 100
-    interval_ids = list(itertools.chain.from_iterable(map(
-        lambda inc: [inc.ids] if len(inc.ids) > 1 else inc.ids, interval_incidents)))
-    end_date_inclusive = end_date - relativedelta(seconds=1)
-
-    logging.warning("From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Incidents: {}"
-                    .format(start_date.isoformat(),
-                            end_date_inclusive.isoformat(),
-                            interval_uptime,
-                            len(interval_incidents),
-                            str(timedelta(seconds=interval_downtime)),
-                            interval_ids)
-                    )
 
 
 # Generate sub-intervals from start_date (inclusive) to end_date (exclusive) with relative_delta step.
@@ -207,7 +253,7 @@ def intervals_gen(start_date: datetime, end_date: datetime, relative_delta: rela
 
 
 def parse_service_id(string: str) -> str:
-    match = re.search(r'https://[a-zA-Z0-9.-_]*pagerduty\.com/services/([a-zA-Z0-9]+)', string)
+    match = re.search(r"https://[a-zA-Z0-9.-_]*pagerduty\.com/services/([a-zA-Z0-9]+)", string)
     if match:
         return match.group(1)
     return string
@@ -230,7 +276,6 @@ def parse_relativedelta(string: str) -> relativedelta:
     raise AssertionError("Should never occur. It's script bug.")
 
 
-# Go go, Power Rangers!
 def main() -> int:
     # args
     argparser = argparse.ArgumentParser(description="pagerduty-service-uptime")
@@ -293,9 +338,9 @@ def main() -> int:
         required=True,
         help="report step, must match '(\\d+) (hour|day|month|year)s', e.g. 1 month")
     argparser.add_argument(
-        '--version',
-        action='version',
-        version='%(prog)s 2.0.0')
+        "--version",
+        action="version",
+        version=("%(prog)s " + VERSION))
     args = argparser.parse_args()
 
     # logging
@@ -309,27 +354,42 @@ def main() -> int:
     logging.info("report_step={}".format(args.report_step))
 
     # main logic
-    incidents = []
+    incidents: List[str] = []
     with requests.Session() as requests_session:
         collect_step = relativedelta(months=4)
         for interval_since, interval_until in intervals_gen(args.incidents_since, args.incidents_until, collect_step):
             collected_incidents = \
-                collect_incidents_from_pagerduty(requests_session, args.api_token, args.service_ids, args.title_checks,
-                                                 interval_since, interval_until)
+                call_pagerduty_list_incidents(requests_session, args.api_token, args.service_ids, args.title_checks,
+                                              interval_since, interval_until)
             incidents.extend(collected_incidents)
-    incidents.sort(key=lambda inc: (inc.created, -inc.total_seconds()))
     logging.info("len(incidents)={}".format(len(incidents)))
 
-    merged_incidents = merge_overlapping_incidents(incidents)
-    logging.info("len(merged_incidents)={}".format(len(merged_incidents)))
-    logging.debug("merged_incidents={}".format(str(merged_incidents)))
+    alerts: List[Alert] = []
+    simplified_alerts: List[Alert] = []
+    with requests.Session() as requests_session:
+        for incident_id in incidents:
+            collected_alerts = call_pagerduty_list_alerts_for_an_incident(requests_session, args.api_token, incident_id)
+            # Simplify alerts - merge overlapping alerts for one incident.
+            # If all alerts overlap, then simplify the id.
+            merged_collected_alerts = merge_overlapping_alerts(collected_alerts)
+            if len(merged_collected_alerts) == 1:
+                merged_collected_alerts[0].ids = [incident_id]
+            alerts.extend(collected_alerts)
+            simplified_alerts.extend(merged_collected_alerts)
+    simplified_alerts.sort(key=lambda inc: (inc.created, -inc.total_seconds()))
+    logging.info("len(alerts)={}".format(len(alerts)))
+    logging.info("len(simplified_alerts)={}".format(len(simplified_alerts)))
+
+    merged_alerts = merge_overlapping_alerts(simplified_alerts)
+    logging.info("len(merged_alerts)={}".format(len(merged_alerts)))
+    logging.debug("merged_alerts={}".format(str(merged_alerts)))
 
     for interval_since, interval_until in intervals_gen(args.incidents_since, args.incidents_until, args.report_step):
-        interval_incidents = filter_incidents(interval_since, interval_until, merged_incidents)
-        report_uptime(interval_since, interval_until, interval_incidents)
+        interval_alerts = filter_alerts(interval_since, interval_until, merged_alerts)
+        report_uptime(interval_since, interval_until, interval_alerts)
 
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

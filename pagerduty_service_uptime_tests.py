@@ -5,108 +5,108 @@ import unittest
 from pagerduty_service_uptime import *
 
 
-class TestIncidentsOverlap(unittest.TestCase):
+class TestAlertsOverlap(unittest.TestCase):
 
     def test_not_overlapping_one_second(self):
-        self.assertFalse(incidents_overlap(
-            Incident([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
-            Incident([], parse_date('2020-10-01 11:00:01'), parse_date('2020-10-01 12:00:00'))
+        self.assertFalse(alerts_overlap(
+            Alert([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
+            Alert([], parse_date('2020-10-01 11:00:01'), parse_date('2020-10-01 12:00:00'))
         ))
 
     def test_not_overlapping_one_hour(self):
-        self.assertFalse(incidents_overlap(
-            Incident([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
-            Incident([], parse_date('2020-10-01 12:00:00'), parse_date('2020-10-01 12:00:01'))
+        self.assertFalse(alerts_overlap(
+            Alert([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
+            Alert([], parse_date('2020-10-01 12:00:00'), parse_date('2020-10-01 12:00:01'))
         ))
 
     def test_not_overlapping_one_day(self):
-        self.assertFalse(incidents_overlap(
-            Incident([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
-            Incident([], parse_date('2020-10-02 10:00:00'), parse_date('2020-10-02 11:00:00')),
+        self.assertFalse(alerts_overlap(
+            Alert([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
+            Alert([], parse_date('2020-10-02 10:00:00'), parse_date('2020-10-02 11:00:00')),
         ))
 
     def test_overlapping_started_same_second(self):
-        self.assertTrue(incidents_overlap(
-            Incident([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
-            Incident([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
+        self.assertTrue(alerts_overlap(
+            Alert([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
+            Alert([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
         ))
 
     def test_overlapping_started_one_second(self):
-        self.assertTrue(incidents_overlap(
-            Incident([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
-            Incident([], parse_date('2020-10-01 10:00:01'), parse_date('2020-10-01 11:00:05')),
+        self.assertTrue(alerts_overlap(
+            Alert([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
+            Alert([], parse_date('2020-10-01 10:00:01'), parse_date('2020-10-01 11:00:05')),
         ))
 
     def test_overlapping_same_second(self):
-        self.assertTrue(incidents_overlap(
-            Incident([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
-            Incident([], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 12:00:00')),
+        self.assertTrue(alerts_overlap(
+            Alert([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
+            Alert([], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 12:00:00')),
         ))
 
     def test_overlapping_one_second(self):
-        self.assertTrue(incidents_overlap(
-            Incident([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:01')),
-            Incident([], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 12:00:00')),
+        self.assertTrue(alerts_overlap(
+            Alert([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:01')),
+            Alert([], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 12:00:00')),
         ))
 
     def test_overlapping_one_hour(self):
-        self.assertTrue(incidents_overlap(
-            Incident([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
-            Incident([], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 12:05:00')),
+        self.assertTrue(alerts_overlap(
+            Alert([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
+            Alert([], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 12:05:00')),
         ))
 
-    def test_overlapping_second_incident_ends_before_first(self):
-        self.assertTrue(incidents_overlap(
-            Incident([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
-            Incident([], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 11:05:00')),
+    def test_overlapping_second_alert_ends_before_first(self):
+        self.assertTrue(alerts_overlap(
+            Alert([], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
+            Alert([], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 11:05:00')),
         ))
 
 
-class TestMergeTwoIncidents(unittest.TestCase):
+class TestMergeTwoAlerts(unittest.TestCase):
 
     def test_overlapping_started_same_second(self):
         self.assertEqual(
-            merge_two_incidents(
-                Incident([10, 13], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
-                Incident([8], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
+            merge_two_alerts(
+                Alert([10, 13], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
+                Alert([8], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
             ),
-            Incident([10, 13, 8], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
+            Alert([10, 13, 8], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
         )
 
     def test_overlapping_same_second(self):
         self.assertEqual(
-            merge_two_incidents(
-                Incident([10, 13], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
-                Incident([8], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 12:00:00')),
+            merge_two_alerts(
+                Alert([10, 13], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
+                Alert([8], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 12:00:00')),
             ),
-            Incident([10, 13, 8], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
+            Alert([10, 13, 8], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
         )
 
     def test_overlapping_one_second(self):
         self.assertEqual(
-            merge_two_incidents(
-                Incident([9], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:01')),
-                Incident([1, 3], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 12:00:00')),
+            merge_two_alerts(
+                Alert([9], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:01')),
+                Alert([1, 3], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 12:00:00')),
             ),
-            Incident([9, 1, 3], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
+            Alert([9, 1, 3], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
         )
 
     def test_overlapping_one_hour(self):
         self.assertEqual(
-            merge_two_incidents(
-                Incident([1], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
-                Incident([2], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 12:05:00')),
+            merge_two_alerts(
+                Alert([1], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
+                Alert([2], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 12:05:00')),
             ),
-            Incident([1, 2], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:05:00')),
+            Alert([1, 2], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:05:00')),
         )
 
-    def test_overlapping_second_incident_ends_before_first(self):
+    def test_overlapping_second_alert_ends_before_first(self):
         self.assertEqual(
-            merge_two_incidents(
-                Incident([1, 3, 4], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
-                Incident([2, 5, 6], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 11:05:00')),
+            merge_two_alerts(
+                Alert([1, 3, 4], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
+                Alert([2, 5, 6], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 11:05:00')),
             ),
-            Incident([1, 3, 4, 2, 5, 6], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
+            Alert([1, 3, 4, 2, 5, 6], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 12:00:00')),
         )
 
 
@@ -186,109 +186,109 @@ class TestIntervalsGen(unittest.TestCase):
         ])
 
 
-class TestMergeOverlappingIncidents(unittest.TestCase):
+class TestMergeOverlappingAlerts(unittest.TestCase):
 
-    def test_some_incidents_overlaps(self):
-        merged_incidents = merge_overlapping_incidents([
-            Incident([1], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
-            Incident([2], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 11:00:01')),
-            Incident([3], parse_date('2020-10-01 11:00:01'), parse_date('2020-10-01 11:00:02')),
-            Incident([4], parse_date('2020-10-01 12:00:00'), parse_date('2020-10-01 12:00:05')),
-            Incident([5], parse_date('2020-10-01 12:00:06'), parse_date('2020-10-01 13:00:00')),
-            Incident([6], parse_date('2020-10-01 12:00:07'), parse_date('2020-10-01 12:30:00')),
-            Incident([7], parse_date('2020-10-01 13:00:00'), parse_date('2020-10-01 13:00:00')),
-            Incident([8], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:00:01')),
-            Incident([9], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:10:10')),
-            Incident([10], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:05:00')),
-            Incident([11], parse_date('2020-10-01 15:00:00'), parse_date('2020-10-01 15:05:00')),
-            Incident([12], parse_date('2020-10-01 15:01:00'), parse_date('2020-10-01 15:01:05')),
-            Incident([13], parse_date('2020-10-01 15:01:00'), parse_date('2020-10-01 15:01:06')),
+    def test_some_alerts_overlaps(self):
+        merged_alerts = merge_overlapping_alerts([
+            Alert([1], parse_date('2020-10-01 10:00:00'), parse_date('2020-10-01 11:00:00')),
+            Alert([2], parse_date('2020-10-01 11:00:00'), parse_date('2020-10-01 11:00:01')),
+            Alert([3], parse_date('2020-10-01 11:00:01'), parse_date('2020-10-01 11:00:02')),
+            Alert([4], parse_date('2020-10-01 12:00:00'), parse_date('2020-10-01 12:00:05')),
+            Alert([5], parse_date('2020-10-01 12:00:06'), parse_date('2020-10-01 13:00:00')),
+            Alert([6], parse_date('2020-10-01 12:00:07'), parse_date('2020-10-01 12:30:00')),
+            Alert([7], parse_date('2020-10-01 13:00:00'), parse_date('2020-10-01 13:00:00')),
+            Alert([8], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:00:01')),
+            Alert([9], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:10:10')),
+            Alert([10], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:05:00')),
+            Alert([11], parse_date('2020-10-01 15:00:00'), parse_date('2020-10-01 15:05:00')),
+            Alert([12], parse_date('2020-10-01 15:01:00'), parse_date('2020-10-01 15:01:05')),
+            Alert([13], parse_date('2020-10-01 15:01:00'), parse_date('2020-10-01 15:01:06')),
         ])
-        self.assertListEqual(merged_incidents, [
-            Incident([1, 2, 3], parse_date("2020-10-01 10:00:00"), parse_date("2020-10-01 11:00:02")),
-            Incident([4], parse_date("2020-10-01 12:00:00"), parse_date("2020-10-01 12:00:05")),
-            Incident([5, 6, 7], parse_date("2020-10-01 12:00:06"), parse_date("2020-10-01 13:00:00")),
-            Incident([8, 9, 10], parse_date("2020-10-01 14:00:00"), parse_date("2020-10-01 14:10:10")),
-            Incident([11, 12, 13], parse_date("2020-10-01 15:00:00"), parse_date("2020-10-01 15:05:00"))
-        ])
-
-    def test_all_incidents_overlaps(self):
-        merged_incidents = merge_overlapping_incidents([
-            Incident([1, 2], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:00:05')),
-            Incident([3, 4, 5], parse_date('2020-10-01 14:00:05'), parse_date('2020-10-01 14:10:10')),
-            Incident([6], parse_date('2020-10-01 14:07:00'), parse_date('2020-10-01 14:11:00'))
-        ])
-        self.assertListEqual(merged_incidents, [
-            Incident([1, 2, 3, 4, 5, 6], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:11:00'))
+        self.assertListEqual(merged_alerts, [
+            Alert([1, 2, 3], parse_date("2020-10-01 10:00:00"), parse_date("2020-10-01 11:00:02")),
+            Alert([4], parse_date("2020-10-01 12:00:00"), parse_date("2020-10-01 12:00:05")),
+            Alert([5, 6, 7], parse_date("2020-10-01 12:00:06"), parse_date("2020-10-01 13:00:00")),
+            Alert([8, 9, 10], parse_date("2020-10-01 14:00:00"), parse_date("2020-10-01 14:10:10")),
+            Alert([11, 12, 13], parse_date("2020-10-01 15:00:00"), parse_date("2020-10-01 15:05:00"))
         ])
 
-    def test_no_incidents_overlaps(self):
-        merged_incidents = merge_overlapping_incidents([
-            Incident([1, 2], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:00:01')),
-            Incident([3, 4, 5], parse_date('2020-10-01 14:00:02'), parse_date('2020-10-01 14:10:10')),
-            Incident([6], parse_date('2020-10-01 14:15:00'), parse_date('2020-10-01 14:15:05'))
+    def test_all_alerts_overlaps(self):
+        merged_alerts = merge_overlapping_alerts([
+            Alert([1, 2], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:00:05')),
+            Alert([3, 4, 5], parse_date('2020-10-01 14:00:05'), parse_date('2020-10-01 14:10:10')),
+            Alert([6], parse_date('2020-10-01 14:07:00'), parse_date('2020-10-01 14:11:00'))
         ])
-        self.assertListEqual(merged_incidents, [
-            Incident([1, 2], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:00:01')),
-            Incident([3, 4, 5], parse_date('2020-10-01 14:00:02'), parse_date('2020-10-01 14:10:10')),
-            Incident([6], parse_date('2020-10-01 14:15:00'), parse_date('2020-10-01 14:15:05'))
+        self.assertListEqual(merged_alerts, [
+            Alert([1, 2, 3, 4, 5, 6], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:11:00'))
         ])
 
+    def test_no_alerts_overlaps(self):
+        merged_alerts = merge_overlapping_alerts([
+            Alert([1, 2], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:00:01')),
+            Alert([3, 4, 5], parse_date('2020-10-01 14:00:02'), parse_date('2020-10-01 14:10:10')),
+            Alert([6], parse_date('2020-10-01 14:15:00'), parse_date('2020-10-01 14:15:05'))
+        ])
+        self.assertListEqual(merged_alerts, [
+            Alert([1, 2], parse_date('2020-10-01 14:00:00'), parse_date('2020-10-01 14:00:01')),
+            Alert([3, 4, 5], parse_date('2020-10-01 14:00:02'), parse_date('2020-10-01 14:10:10')),
+            Alert([6], parse_date('2020-10-01 14:15:00'), parse_date('2020-10-01 14:15:05'))
+        ])
 
-class TestFilterIncidents(unittest.TestCase):
 
-    def test_some_incident_matches(self):
-        filtered_incidents = filter_incidents(
+class TestFilterAlerts(unittest.TestCase):
+
+    def test_some_alert_matches(self):
+        filtered_alerts = filter_alerts(
             parse_date("2020-01-01 00:00:05"),
             parse_date("2020-03-03 10:00:05"),
             [
-                Incident([1, 2], parse_date("2019-01-12 10:00:00"), parse_date("2019-01-13 11:00:02")),
-                Incident([3], parse_date("2020-01-01 00:00:04"), parse_date("2020-02-01 00:00:00")),
-                Incident([4, 5], parse_date("2020-01-01 00:00:05"), parse_date("2020-02-01 00:00:00")),
-                Incident([6], parse_date("2020-01-01 00:00:06"), parse_date("2020-02-01 00:00:00")),
-                Incident([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
-                Incident([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35")),
-                Incident([10], parse_date("2020-03-03 10:00:04"), parse_date("2020-03-03 17:00:35")),
-                Incident([11, 12, 13], parse_date("2020-03-03 10:00:05"), parse_date("2020-03-03 17:00:35")),
-                Incident([14, 15], parse_date("2020-03-03 10:00:06"), parse_date("2020-03-03 17:00:35")),
-                Incident([16], parse_date("2020-04-01 12:00:00"), parse_date("2020-10-01 12:00:05")),
-                Incident([17], parse_date("2020-07-01 12:00:00"), parse_date("2020-10-01 12:00:05")),
-                Incident([18], parse_date("2021-01-01 12:00:00"), parse_date("2021-01-01 12:00:05"))
+                Alert([1, 2], parse_date("2019-01-12 10:00:00"), parse_date("2019-01-13 11:00:02")),
+                Alert([3], parse_date("2020-01-01 00:00:04"), parse_date("2020-02-01 00:00:00")),
+                Alert([4, 5], parse_date("2020-01-01 00:00:05"), parse_date("2020-02-01 00:00:00")),
+                Alert([6], parse_date("2020-01-01 00:00:06"), parse_date("2020-02-01 00:00:00")),
+                Alert([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
+                Alert([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35")),
+                Alert([10], parse_date("2020-03-03 10:00:04"), parse_date("2020-03-03 17:00:35")),
+                Alert([11, 12, 13], parse_date("2020-03-03 10:00:05"), parse_date("2020-03-03 17:00:35")),
+                Alert([14, 15], parse_date("2020-03-03 10:00:06"), parse_date("2020-03-03 17:00:35")),
+                Alert([16], parse_date("2020-04-01 12:00:00"), parse_date("2020-10-01 12:00:05")),
+                Alert([17], parse_date("2020-07-01 12:00:00"), parse_date("2020-10-01 12:00:05")),
+                Alert([18], parse_date("2021-01-01 12:00:00"), parse_date("2021-01-01 12:00:05"))
 
             ])
-        self.assertListEqual(filtered_incidents, [
-            Incident([4, 5], parse_date("2020-01-01 00:00:05"), parse_date("2020-02-01 00:00:00")),
-            Incident([6], parse_date("2020-01-01 00:00:06"), parse_date("2020-02-01 00:00:00")),
-            Incident([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
-            Incident([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35")),
-            Incident([10], parse_date("2020-03-03 10:00:04"), parse_date("2020-03-03 17:00:35"))
+        self.assertListEqual(filtered_alerts, [
+            Alert([4, 5], parse_date("2020-01-01 00:00:05"), parse_date("2020-02-01 00:00:00")),
+            Alert([6], parse_date("2020-01-01 00:00:06"), parse_date("2020-02-01 00:00:00")),
+            Alert([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
+            Alert([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35")),
+            Alert([10], parse_date("2020-03-03 10:00:04"), parse_date("2020-03-03 17:00:35"))
         ])
 
-    def test_all_incidents_matches(self):
-        filtered_incidents = filter_incidents(
+    def test_all_alerts_matches(self):
+        filtered_alerts = filter_alerts(
             parse_date("2020-01-01 00:00:05"),
             parse_date("2020-03-03 10:00:05"),
             [
-                Incident([6], parse_date("2020-01-01 00:00:06"), parse_date("2020-02-01 00:00:00")),
-                Incident([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
-                Incident([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35"))
+                Alert([6], parse_date("2020-01-01 00:00:06"), parse_date("2020-02-01 00:00:00")),
+                Alert([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
+                Alert([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35"))
             ])
-        self.assertListEqual(filtered_incidents, [
-            Incident([6], parse_date("2020-01-01 00:00:06"), parse_date("2020-02-01 00:00:00")),
-            Incident([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
-            Incident([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35"))
+        self.assertListEqual(filtered_alerts, [
+            Alert([6], parse_date("2020-01-01 00:00:06"), parse_date("2020-02-01 00:00:00")),
+            Alert([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
+            Alert([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35"))
         ])
 
-    def test_no_incident_matches(self):
-        filtered_incidents = filter_incidents(
+    def test_no_alert_matches(self):
+        filtered_alerts = filter_alerts(
             parse_date("2020-03-03 10:00:05"),
             parse_date("2020-03-03 10:00:07"),
             [
-                Incident([6], parse_date("2020-01-01 00:00:06"), parse_date("2020-02-01 00:00:00")),
-                Incident([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
-                Incident([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35"))
+                Alert([6], parse_date("2020-01-01 00:00:06"), parse_date("2020-02-01 00:00:00")),
+                Alert([7], parse_date("2020-02-01 12:00:00"), parse_date("2020-02-01 12:00:05")),
+                Alert([8, 9], parse_date("2020-02-14 17:05:00"), parse_date("2020-02-14 17:00:35"))
             ])
-        self.assertListEqual(filtered_incidents, [])
+        self.assertListEqual(filtered_alerts, [])
 
 
 if __name__ == '__main__':
