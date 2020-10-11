@@ -21,7 +21,8 @@ Usage example:
         --title-checks "^Downtime"
         --incidents-since "2019-01-01T00:00:00Z" \
         --incidents-until "2020-01-01T00:00:00Z" \
-        --report-step "1 month"
+        --report-step "1 month" \
+        --report-details-level 1
 
 PagerDuty api key:
     https://support.pagerduty.com/docs/generating-api-keys#section-generating-a-personal-rest-api-key

@@ -221,7 +221,10 @@ def filter_alerts(start_date: datetime, end_date: datetime, all_alerts: List[Ale
 
 
 # Print final report about uptime.
-def report_uptime(start_date: datetime, end_date: datetime, interval_alerts: List[Alert]) -> type(None):
+def report_uptime(start_date: datetime,
+                  end_date: datetime,
+                  interval_alerts: List[Alert],
+                  report_details_level: int) -> type(None):
     interval_duration = (end_date - start_date).total_seconds()
     interval_downtime = sum(map(lambda inc: inc.total_seconds(), interval_alerts))
     interval_uptime = (1 - (interval_downtime / interval_duration)) * 100
@@ -229,14 +232,23 @@ def report_uptime(start_date: datetime, end_date: datetime, interval_alerts: Lis
         lambda inc: [inc.ids] if len(inc.ids) > 1 else inc.ids, interval_alerts)))
     end_date_inclusive = end_date - relativedelta(seconds=1)
 
-    logging.warning("From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Incidents: {}"
-                    .format(start_date.isoformat(),
-                            end_date_inclusive.isoformat(),
-                            interval_uptime,
-                            len(interval_alerts),
-                            str(timedelta(seconds=interval_downtime)),
-                            interval_ids)
-                    )
+    if report_details_level == 0:
+        logging.warning("From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8}"
+                        .format(start_date.isoformat(),
+                                end_date_inclusive.isoformat(),
+                                interval_uptime,
+                                len(interval_alerts),
+                                str(timedelta(seconds=interval_downtime)))
+                        )
+    if report_details_level == 1:
+        logging.warning("From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Incidents: {}"
+                        .format(start_date.isoformat(),
+                                end_date_inclusive.isoformat(),
+                                interval_uptime,
+                                len(interval_alerts),
+                                str(timedelta(seconds=interval_downtime)),
+                                interval_ids)
+                        )
 
 
 # Function that checks if an incident indicates a service outage.
@@ -351,6 +363,15 @@ def main() -> int:
         required=True,
         help="report step, must match '(\\d+) (hour|day|month|year)s', e.g. 1 month")
     argparser.add_argument(
+        "--report-details-level",
+        metavar="LVL",
+        dest="report_details_level",
+        type=int,
+        choices=[0, 1],
+        required=False,
+        default=0,
+        help="number of details in the report; from 0 to 1; higher = more details")
+    argparser.add_argument(
         "--version",
         action="version",
         version=("%(prog)s " + VERSION))
@@ -416,7 +437,7 @@ def main() -> int:
 
     for interval_since, interval_until in intervals_gen(args.incidents_since, args.incidents_until, args.report_step):
         interval_alerts = filter_alerts(interval_since, interval_until, merged_alerts)
-        report_uptime(interval_since, interval_until, interval_alerts)
+        report_uptime(interval_since, interval_until, interval_alerts, args.report_details_level)
 
     return 0
 
