@@ -25,3 +25,6 @@ Usage example:
 
 PagerDuty api key:
     https://support.pagerduty.com/docs/generating-api-keys#section-generating-a-personal-rest-api-key
+
+Anything else you need to know:
+    The script caches some PagerDuty API responses to a folder called ".cache" in the working directory.
