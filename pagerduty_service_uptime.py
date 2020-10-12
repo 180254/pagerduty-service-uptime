@@ -140,7 +140,7 @@ def call_pagerduty_list_alerts_for_an_incident(cache: Cache,
     # Script is processing only resolved incidents.
     cache_item_id = f"alerts_for_an_incident-{incident_id}"
 
-    if cache.__contains__(cache_item_id):
+    if cache_item_id in cache:
         return cache.get(cache_item_id)
 
     api_alerts = call_pagerduty_api(
