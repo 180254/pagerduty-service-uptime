@@ -15,7 +15,7 @@ Usage:
 Usage example:
     PAGERDUTY_API_TOKEN="some-key-11"
     ./pagerduty_service_uptime.py \
-        --log-level WARN \
+        --log-level INFO \
         --api-token "$PAGERDUTY_API_TOKEN" \
         --service-ids "https://some.pagerduty.com/services/ABCDEF4" \
         --title-checks "^Downtime"
