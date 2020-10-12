@@ -232,23 +232,20 @@ def report_uptime(start_date: datetime,
         lambda inc: [inc.ids] if len(inc.ids) > 1 else inc.ids, interval_alerts)))
     end_date_inclusive = end_date - relativedelta(seconds=1)
 
+    report_msg = ""
     if report_details_level == 0:
-        logging.warning("From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8}"
-                        .format(start_date.isoformat(),
-                                end_date_inclusive.isoformat(),
-                                interval_uptime,
-                                len(interval_alerts),
-                                str(timedelta(seconds=interval_downtime)))
-                        )
-    if report_details_level == 1:
-        logging.warning("From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Incidents: {}"
-                        .format(start_date.isoformat(),
-                                end_date_inclusive.isoformat(),
-                                interval_uptime,
-                                len(interval_alerts),
-                                str(timedelta(seconds=interval_downtime)),
-                                interval_ids)
-                        )
+        report_msg = "From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8}"
+    elif report_details_level == 1:
+        report_msg = "From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Incidents: {}"
+
+    logging.warning(
+        report_msg.format(start_date.isoformat(),
+                          end_date_inclusive.isoformat(),
+                          interval_uptime,
+                          len(interval_alerts),
+                          str(timedelta(seconds=interval_downtime)),
+                          interval_ids)
+    )
 
 
 # Function that checks if an incident indicates a service outage.
