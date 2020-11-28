@@ -227,11 +227,11 @@ def report_uptime(start_date: datetime,
                   report_details_level: int) -> type(None):
     interval_alerts_len = len(interval_alerts)
     interval_duration = (end_date - start_date).total_seconds()
-    interval_downtime = sum(map(lambda inc: inc.total_seconds(), interval_alerts))
+    interval_downtime = sum(map(lambda alert: alert.total_seconds(), interval_alerts))
     interval_uptime = (1 - (interval_downtime / interval_duration)) * 100
     interval_mttr = interval_downtime / interval_alerts_len if interval_alerts_len > 0 else 0
     interval_ids = list(itertools.chain.from_iterable(map(
-        lambda inc: [inc.ids] if len(inc.ids) > 1 else inc.ids, interval_alerts)))
+        lambda alert: [alert.ids] if len(alert.ids) > 1 else alert.ids, interval_alerts)))
     end_date_inclusive = end_date - relativedelta(seconds=1)
 
     report_msg = ""
