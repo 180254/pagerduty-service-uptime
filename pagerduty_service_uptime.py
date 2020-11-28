@@ -225,18 +225,20 @@ def report_uptime(start_date: datetime,
                   end_date: datetime,
                   interval_alerts: List[Alert],
                   report_details_level: int) -> type(None):
+    interval_alerts_len = len(interval_alerts)
     interval_duration = (end_date - start_date).total_seconds()
     interval_downtime = sum(map(lambda inc: inc.total_seconds(), interval_alerts))
     interval_uptime = (1 - (interval_downtime / interval_duration)) * 100
+    interval_mttr = interval_downtime / interval_alerts_len if interval_alerts_len > 0 else 0
     interval_ids = list(itertools.chain.from_iterable(map(
         lambda inc: [inc.ids] if len(inc.ids) > 1 else inc.ids, interval_alerts)))
     end_date_inclusive = end_date - relativedelta(seconds=1)
 
     report_msg = ""
     if report_details_level == 0:
-        report_msg = "From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8}"
+        report_msg = "From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Mttr: {: >8}"
     elif report_details_level == 1:
-        report_msg = "From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Incidents: {}"
+        report_msg = "From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Mttr: {: >8} Incidents: {}"
 
     logging.warning(
         report_msg.format(start_date.isoformat(),
@@ -244,6 +246,7 @@ def report_uptime(start_date: datetime,
                           interval_uptime,
                           len(interval_alerts),
                           str(timedelta(seconds=interval_downtime)),
+                          str(timedelta(seconds=int(interval_mttr))),
                           interval_ids)
     )
 
