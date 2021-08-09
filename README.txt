@@ -1,7 +1,7 @@
 What is this:
     pagerduty-service-uptime
     Calculates system uptime based on incidents in PagerDuty.
-    Allows to indicate which incidents are considered as downtime and affect the calculation of uptime.
+    Allows indicating which incidents are considered as downtime and affect the calculation of uptime.
 
 Installation of required packages (Debian-based Linux):
     sudo apt-get install python3 python3-pip
@@ -18,13 +18,13 @@ Usage example:
         --log-level INFO \
         --api-token "$PAGERDUTY_API_TOKEN" \
         --service-ids "https://some.pagerduty.com/services/ABCDEF4" \
-        --title-checks "^Downtime"
+        --title-checks "^Downtime" "^Outage"
         --incidents-since "2019-01-01T00:00:00Z" \
         --incidents-until "2020-01-01T00:00:00Z" \
         --report-step "1 month" \
         --report-details-level 1
 
-PagerDuty api key:
+PagerDuty API Key:
     https://support.pagerduty.com/docs/generating-api-keys#section-generating-a-personal-rest-api-key
 
 Anything else you need to know:

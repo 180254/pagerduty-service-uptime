@@ -17,7 +17,7 @@ from dateutil.parser import parse as parse_date
 from dateutil.relativedelta import relativedelta
 from diskcache import Cache
 
-VERSION = "3.0.0"
+VERSION = "3.0.1"
 
 
 class Alert:
@@ -310,15 +310,15 @@ def main() -> int:
         dest="log_level",
         type=str,
         required=True,
-        help="one of CRITICAL, ERROR, WARN, INFO, DEBUG, NOTSET")
+        help="verbosity level, one of the following values: CRITICAL, ERROR, WARN, INFO, DEBUG, NOTSET")
     argparser.add_argument(
         "--api-token",
         metavar="APITOKEN",
         dest="api_token",
         type=str,
         required=True,
-        help="personal rest api key, "
-             "check https://support.pagerduty.com/docs/generating-api-keys#section-generating-a-personal-rest-api-key")
+        help="personal REST API Key for PagerDuty service "
+             "(https://support.pagerduty.com/docs/generating-api-keys#section-generating-a-personal-rest-api-key)")
     argparser.add_argument(
         "--service-ids",
         metavar="SERVICEID",
@@ -326,8 +326,9 @@ def main() -> int:
         type=parse_service_id,
         nargs="+",
         required=True,
-        help="service id (e.g. ABCDEF4) or service url (e.g. https://some.pagerduty.com/services/ABCDEF4); "
-             "takes several values, which will be coordinated using OR")
+        help="services for which the script will make calculations, "
+             "values can be service ID (e.g., ABCDEF4) "
+             "or service URL (e.g., https://some.pagerduty.com/services/ABCDEF4)")
     argparser.add_argument(
         "--title-checks",
         metavar="PATTERN",
@@ -335,33 +336,31 @@ def main() -> int:
         type=re.compile,
         nargs="*",
         required=False,
-        help="incident title check pattern, eg. '^Downtime'; "
-             "the title of the incident must match a given regular expressions to be taken into account; "
-             "takes several values, which will be coordinated using OR; "
-             "if not specified, it means each incident affects uptime calculation")
+        help="regular expressions for checking title, eg. '^Downtime' '^Outage'; "
+             "the event title must match any of the given regular expressions to be considered downtime")
     argparser.add_argument(
         "--incidents-since",
         metavar="ISODATE",
         dest="incidents_since",
         type=parse_date,
         required=True,
-        help="beginning (inclusive) of the reported time range; "
-             "iso8601 date, e.g. 2019-01-01T00:00:00Z")
+        help="start date of the time range to be checked (inclusive); "
+             "must be in iso8601 format, e.g., '2019-01-01T00:00:00Z'")
     argparser.add_argument(
         "--incidents-until",
         metavar="ISODATE",
         dest="incidents_until",
         type=parse_date,
         required=True,
-        help="end (exclusive) of the reported time range; "
-             "iso8601 date, e.g. 2020-01-01T00:00:00Z")
+        help="end date of the time range to be checked (exclusive); "
+             "must be in iso8601 format, e.g., '2020-01-01T00:00:00Z'")
     argparser.add_argument(
         "--report-step",
         metavar="STEP",
         dest="report_step",
         type=parse_relativedelta,
         required=True,
-        help="report step, must match '(\\d+) (hour|day|month|year)s', e.g. 1 month")
+        help="report step, e.g., '14 days', '6 months', '1 year'")
     argparser.add_argument(
         "--report-details-level",
         metavar="LVL",
@@ -370,7 +369,7 @@ def main() -> int:
         choices=[0, 1],
         required=False,
         default=0,
-        help="number of details in the report; from 0 to 1; higher = more details")
+        help="detail level of the report, one of the following values: 0, 1; higher value = more details")
     argparser.add_argument(
         "--version",
         action="version",
