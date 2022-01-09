@@ -1,13 +1,15 @@
 What is this:
     pagerduty-service-uptime
     Calculates system uptime based on incidents in PagerDuty.
-    Allows indicating which incidents are considered as downtime and affect the calculation of uptime.
+    Allows indicating which incidents are considered downtime and affect the calculation of uptime.
 
 Installation of required packages (Debian-based Linux):
-    sudo apt-get install python3 python3-pip
+    sudo apt-get install python3 python3-pip python3-venv
 
-Installation of required dependencies:
-    pip3 install --user --upgrade -r requirements.txt
+Preparing python environment:
+    python3 -m venv venv
+    venv/bin/pip3 install --upgrade pip wheel setuptools
+    venv/bin/pip3 install --disable-pip-version-check --upgrade -r requirements.txt
 
 Usage:
     ./pagerduty_service_uptime.py --help
