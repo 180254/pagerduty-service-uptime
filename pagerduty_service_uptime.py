@@ -17,7 +17,7 @@ from dateutil.parser import parse as parse_date
 from dateutil.relativedelta import relativedelta
 from diskcache import Cache
 
-VERSION = "3.0.1"
+VERSION = "3.x.x-snapshot"
 
 
 class Alert:
