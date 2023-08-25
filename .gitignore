@@ -2,4 +2,4 @@
 .cache/
 .ruff_cache/
 venv/
-secrets*
+notepad.txt
