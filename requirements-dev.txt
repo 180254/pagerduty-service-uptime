@@ -1,0 +1,2 @@
+types-requests>=2, <3
+types-python-dateutil>=2, <3

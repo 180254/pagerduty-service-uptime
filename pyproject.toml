@@ -1,3 +1,7 @@
+[tool.black]
+line-length = 120
+target-version = ["py310", "py311", "py312"]
+
 [tool.ruff]
 select = ["ALL"]
 ignore = [
@@ -26,6 +30,10 @@ target-version = "py310"
 [tool.ruff.pydocstyle]
 convention = "google"
 
-[tool.black]
-line-length = 120
-target-version = ["py310", "py311", "py312"]
+[tool.mypy]
+python_version = "3.10"
+python_executable = "./venv/bin/python3"
+
+[[tool.mypy.overrides]]
+module = ["diskcache"]
+ignore_missing_imports = true
