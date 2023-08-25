@@ -183,11 +183,11 @@ def merge_overlapping_alerts(alerts: list[Alert]) -> list[Alert]:
                 ret.pop(i)
                 performed_any_merge = True
 
-    # Above algorithm should works. Lets check.
-    for i in range(len(ret)):
-        for j in range(len(ret)):
-            if i != j and alerts_overlap(ret[i], ret[j]):
-                msg = f"Omg. {i} and {j} ({ret[i]} and {ret[j]}) overlaps! It's script bug."
+    # Above algorithm should work. Let's check.
+    for i, alert_1 in enumerate(ret):
+        for j, alert_2 in enumerate(ret):
+            if i != j and alerts_overlap(alert_1, alert_2):
+                msg = f"Omg. {i} and {j} ({alert_1} and {alert_2}) overlaps! It's script bug."
                 raise AssertionError(msg)
     return ret
 
@@ -243,6 +243,7 @@ def report_uptime(
         report_msg = "From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Mttr: {: >8} Incidents: {}"
 
     logging.warning(
+        "%s",
         report_msg.format(
             start_date.isoformat(),
             end_date_inclusive.isoformat(),
@@ -273,8 +274,7 @@ def intervals_gen(
     interval_since = start_date
     while interval_since < end_date:
         interval_until = interval_since + relative_delta
-        if interval_until > end_date:
-            interval_until = end_date
+        interval_until = min(interval_until, end_date)
         yield interval_since, interval_until
         interval_since = interval_until
 
