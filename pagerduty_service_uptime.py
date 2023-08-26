@@ -21,7 +21,7 @@ from diskcache import Cache
 if TYPE_CHECKING:
     from concurrent.futures import Future
 
-VERSION = "3.x.x-snapshot"
+VERSION = "3.1.0"
 
 
 class Incident:
