@@ -20,7 +20,8 @@ Usage example:
         --log-level INFO \
         --api-token "$PAGERDUTY_API_TOKEN" \
         --service-ids "https://some.pagerduty.com/services/ABCDEF4" \
-        --title-checks "^Downtime" "^Outage"
+        --title-checks "^Downtime" "^Outage" \
+        --priority-checks "P1" "P2" \
         --incidents-since "2019-01-01T00:00:00Z" \
         --incidents-until "2020-01-01T00:00:00Z" \
         --report-step "1 month" \
