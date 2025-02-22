@@ -239,6 +239,59 @@ class TestIntervalsGen(unittest.TestCase):
             ],
         )
 
+    def test7(self) -> None:
+        intervals = list(
+            intervals_gen(
+                parse_date("2025-01-29 00:00:00"), parse_date("2026-01-29 00:00:00"), parse_relativedelta("1 month")
+            )
+        )
+        self.assertListEqual(
+            intervals,
+            [
+                # 2025-01-29 is a date in the middle of the month.
+                # Keep the 29th day of the month for the remaining dates.
+                # For February, use 2025-02-28, as that month does not have a 29th day.
+                (parse_date("2025-01-29 00:00:00"), parse_date("2025-02-28 00:00:00")),
+                (parse_date("2025-02-28 00:00:00"), parse_date("2025-03-29 00:00:00")),
+                (parse_date("2025-03-29 00:00:00"), parse_date("2025-04-29 00:00:00")),
+                (parse_date("2025-04-29 00:00:00"), parse_date("2025-05-29 00:00:00")),
+                (parse_date("2025-05-29 00:00:00"), parse_date("2025-06-29 00:00:00")),
+                (parse_date("2025-06-29 00:00:00"), parse_date("2025-07-29 00:00:00")),
+                (parse_date("2025-07-29 00:00:00"), parse_date("2025-08-29 00:00:00")),
+                (parse_date("2025-08-29 00:00:00"), parse_date("2025-09-29 00:00:00")),
+                (parse_date("2025-09-29 00:00:00"), parse_date("2025-10-29 00:00:00")),
+                (parse_date("2025-10-29 00:00:00"), parse_date("2025-11-29 00:00:00")),
+                (parse_date("2025-11-29 00:00:00"), parse_date("2025-12-29 00:00:00")),
+                (parse_date("2025-12-29 00:00:00"), parse_date("2026-01-29 00:00:00")),
+            ],
+        )
+
+    def test8(self) -> None:
+        intervals = list(
+            intervals_gen(
+                parse_date("2025-01-31 00:00:00"), parse_date("2026-01-31 00:00:00"), parse_relativedelta("1 month")
+            )
+        )
+        self.assertListEqual(
+            intervals,
+            # 2025-01-31 is the last day of the month.
+            # Use the "last day of the month" rule for the remaining dates.
+            [
+                (parse_date("2025-01-31 00:00:00"), parse_date("2025-02-28 00:00:00")),
+                (parse_date("2025-02-28 00:00:00"), parse_date("2025-03-31 00:00:00")),
+                (parse_date("2025-03-31 00:00:00"), parse_date("2025-04-30 00:00:00")),
+                (parse_date("2025-04-30 00:00:00"), parse_date("2025-05-31 00:00:00")),
+                (parse_date("2025-05-31 00:00:00"), parse_date("2025-06-30 00:00:00")),
+                (parse_date("2025-06-30 00:00:00"), parse_date("2025-07-31 00:00:00")),
+                (parse_date("2025-07-31 00:00:00"), parse_date("2025-08-31 00:00:00")),
+                (parse_date("2025-08-31 00:00:00"), parse_date("2025-09-30 00:00:00")),
+                (parse_date("2025-09-30 00:00:00"), parse_date("2025-10-31 00:00:00")),
+                (parse_date("2025-10-31 00:00:00"), parse_date("2025-11-30 00:00:00")),
+                (parse_date("2025-11-30 00:00:00"), parse_date("2025-12-31 00:00:00")),
+                (parse_date("2025-12-31 00:00:00"), parse_date("2026-01-31 00:00:00")),
+            ],
+        )
+
 
 class TestMergeOverlappingAlerts(unittest.TestCase):
     def test_some_alerts_overlaps(self) -> None:

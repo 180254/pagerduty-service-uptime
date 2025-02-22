@@ -2,6 +2,7 @@
 
 import argparse
 import functools
+import itertools
 import logging
 import re
 import sys
@@ -21,7 +22,7 @@ from diskcache import Cache
 if TYPE_CHECKING:
     from concurrent.futures import Future
 
-VERSION = "3.1.0"
+VERSION = "2025-02-22"
 
 
 class Incident:
@@ -285,12 +286,15 @@ def is_outage(
 def intervals_gen(
     start_date: datetime, end_date: datetime, relative_delta: relativedelta
 ) -> Iterator[tuple[datetime, datetime]]:
-    interval_since = start_date
-    while interval_since < end_date:
-        interval_until = interval_since + relative_delta
-        interval_until = min(interval_until, end_date)
+    # This could be simpler, but then the "end of month" case would be broken.
+    # Please see test TestIntervalsGen.test7.
+    for n in itertools.count():
+        interval_since = start_date + (relative_delta * n)
+        interval_until = min(start_date + (relative_delta * (n + 1)), end_date)
         yield interval_since, interval_until
-        interval_since = interval_until
+
+        if interval_until >= end_date:
+            break
 
 
 def parse_service_id(string: str) -> str:
