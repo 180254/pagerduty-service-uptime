@@ -19,7 +19,7 @@ Usage example:
     ./pagerduty_service_uptime.py \
         --log-level INFO \
         --api-token "$PAGERDUTY_API_TOKEN" \
-        --service-ids "https://some.pagerduty.com/services/ABCDEF4" \
+        --service-ids "https://some.pagerduty.com/service-directory/ABCDEF4" \
         --title-checks "^Downtime" "^Outage" \
         --priority-checks "P1" "P2" \
         --incidents-since "2019-01-01T00:00:00Z" \

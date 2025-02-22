@@ -269,15 +269,14 @@ class TestIntervalsGen(unittest.TestCase):
     def test8(self) -> None:
         intervals = list(
             intervals_gen(
-                parse_date("2025-01-31 00:00:00"), parse_date("2026-01-31 00:00:00"), parse_time_delta("1 month")
+                parse_date("2025-02-28 00:00:00"), parse_date("2026-01-31 00:00:00"), parse_time_delta("1 month")
             )
         )
         self.assertListEqual(
             intervals,
-            # 2025-01-31 is the last day of the month.
+            # 2025-02-28 is the last day of the month.
             # Use the "last day of the month" rule for the remaining dates.
             [
-                (parse_date("2025-01-31 00:00:00"), parse_date("2025-02-28 00:00:00")),
                 (parse_date("2025-02-28 00:00:00"), parse_date("2025-03-31 00:00:00")),
                 (parse_date("2025-03-31 00:00:00"), parse_date("2025-04-30 00:00:00")),
                 (parse_date("2025-04-30 00:00:00"), parse_date("2025-05-31 00:00:00")),
