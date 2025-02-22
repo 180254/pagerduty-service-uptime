@@ -10,15 +10,16 @@ import concurrent.futures.thread
 import dataclasses
 import datetime
 import functools
-import gzip
 import itertools
 import logging
 import os
 import pathlib
-import pickle
 import re
+import shelve
 import sys
+import threading
 import time
+import types
 import typing
 
 import requests
@@ -27,28 +28,64 @@ VERSION = "2025-02-21"
 
 
 class Cache:
-    def __init__(self, directory: str = ".cache") -> None:
-        self.cache_dir: pathlib.Path
+    def __init__(self, cache_location: str = ".cache/cache") -> None:
+        self.cache_location: str = cache_location
+        self.cache_path: pathlib.Path
 
-        if pathlib.Path(directory).is_absolute():
-            self.cache_dir = pathlib.Path(directory)
+        if pathlib.Path(cache_location).is_absolute():
+            self.cache_path = pathlib.Path(cache_location)
         else:
-            self.cache_dir = pathlib.Path(os.path.realpath(__file__)).parent / directory
+            self.cache_path = pathlib.Path(os.path.realpath(__file__)).parent / cache_location
+
+        self.cache: shelve.Shelf[object] | None = None
+        self.rlock: threading.RLock = threading.RLock()
+
+    def __enter__(self) -> Cache:
+        with self.rlock:
+            if self.cache is not None:
+                msg = f"Cache already opened: {self.cache_location}."
+                raise RuntimeError(msg)
+
+            self.cache = shelve.open(str(self.cache_path))
+        return self
+
+    def __exit__(
+        self,
+        type_: type[BaseException] | None,
+        value: BaseException | None,
+        traceback: types.TracebackType | None,
+    ) -> None:
+        with self.rlock:
+            if self.cache is None:
+                msg = f"Cache already closed: {self.cache_location}."
+                raise RuntimeError(msg)
+
+            self.cache.close()
+            self.cache = None
 
     def set(self, key: str, value: object) -> None:
-        cache_file = self.cache_dir / f"{key}.pkl.gz"
-        with gzip.open(cache_file, "wb", compresslevel=6) as f:
-            # https://stackoverflow.com/q/79049420
-            # noinspection PyTypeChecker
-            pickle.dump(value, f)
+        with self.rlock:
+            if self.cache is None:
+                msg = f"Cache not opened: {self.cache_location}."
+                raise RuntimeError(msg)
+
+            self.cache[key] = value
 
     def get[T](self, key: str, _expected_type: type[T]) -> T:
-        cache_file = self.cache_dir / f"{key}.pkl.gz"
-        with gzip.open(cache_file, "rb") as f:
-            return typing.cast(T, pickle.load(f))
+        with self.rlock:
+            if self.cache is None:
+                msg = f"Cache not opened: {self.cache_location}."
+                raise RuntimeError(msg)
+
+            return typing.cast(T, self.cache[key])
 
     def __contains__(self, key: str) -> bool:
-        return (self.cache_dir / f"{key}.pkl.gz").exists()
+        with self.rlock:
+            if self.cache is None:
+                msg = f"Cache not opened: {self.cache_location}."
+                raise RuntimeError(msg)
+
+            return key in self.cache
 
 
 # date.timedelta, but with support for months and years.
@@ -547,13 +584,13 @@ def main() -> int:
                     incidents_filtered_out.append(incident.id)
 
     # collect alerts
-    cache = Cache()
     alerts_futures: list[concurrent.futures.Future[list[Alert]]] = []
     original_alerts: list[Alert] = []
     simplified_alerts: list[Alert] = []
     merged_alerts: list[Alert]
     with (
         concurrent.futures.thread.ThreadPoolExecutor(max_workers=8) as executor,
+        Cache() as cache,
         requests.Session() as requests_session,
     ):
         for incident_id in incidents:
