@@ -1,28 +1,141 @@
 #!venv/bin/python3
 
+from __future__ import annotations
+
 import argparse
+import calendar
+import concurrent
+import concurrent.futures
+import concurrent.futures.thread
+import dataclasses
+import datetime
 import functools
+import gzip
 import itertools
 import logging
+import os
+import pathlib
+import pickle
 import re
 import sys
 import time
-from collections.abc import Iterator, Sequence
-from concurrent import futures
-from concurrent.futures.thread import ThreadPoolExecutor
-from datetime import datetime, timedelta
-from re import Pattern
-from typing import TYPE_CHECKING
+import typing
 
 import requests
-from dateutil.parser import parse as parse_date
-from dateutil.relativedelta import relativedelta
-from diskcache import Cache
 
-if TYPE_CHECKING:
-    from concurrent.futures import Future
+VERSION = "2025-02-21"
 
-VERSION = "2025-02-22"
+
+class Cache:
+    def __init__(self, directory: str = ".cache") -> None:
+        self.cache_dir: pathlib.Path
+
+        if pathlib.Path(directory).is_absolute():
+            self.cache_dir = pathlib.Path(directory)
+        else:
+            self.cache_dir = pathlib.Path(os.path.realpath(__file__)).parent / directory
+
+    def set(self, key: str, value: object) -> None:
+        cache_file = self.cache_dir / f"{key}.pkl.gz"
+        with gzip.open(cache_file, "wb", compresslevel=6) as f:
+            # https://stackoverflow.com/q/79049420
+            # noinspection PyTypeChecker
+            pickle.dump(value, f)
+
+    def get[T](self, key: str, _expected_type: type[T]) -> T:
+        cache_file = self.cache_dir / f"{key}.pkl.gz"
+        with gzip.open(cache_file, "rb") as f:
+            return typing.cast(T, pickle.load(f))
+
+    def __contains__(self, key: str) -> bool:
+        return (self.cache_dir / f"{key}.pkl.gz").exists()
+
+
+# date.timedelta, but with support for months and years.
+@dataclasses.dataclass(frozen=True)
+class TimeDelta:
+    years: int = 0
+    months: int = 0
+    weeks: int = 0
+    days: int = 0
+    hours: int = 0
+    minutes: int = 0
+    seconds: int = 0
+
+    # Support [TimeDelta(months=<n>) * int(<k>)] math, useful in loops.
+    def __mul__(self, other: int) -> TimeDelta:
+        return TimeDelta(
+            years=self.years * other,
+            months=self.months * other,
+            weeks=self.weeks * other,
+            days=self.days * other,
+            hours=self.hours * other,
+            minutes=self.minutes * other,
+            seconds=self.seconds * other,
+        )
+
+    def __rmul__(self, other: int) -> TimeDelta:
+        return self * other
+
+    # Support [TimeDelta + TimeDelta] math.
+    @typing.overload
+    def __add__(self, other: TimeDelta) -> TimeDelta: ...
+
+    # Support [TimeDelta + datetime.datetime] math.
+    @typing.overload
+    def __add__(self, other: datetime.datetime) -> datetime.datetime: ...
+
+    def __add__(self, other: TimeDelta | datetime.datetime) -> TimeDelta | datetime.datetime:
+        if isinstance(other, TimeDelta):
+            return TimeDelta(
+                years=self.years + other.years,
+                months=self.months + other.months,
+                weeks=self.weeks + other.weeks,
+                days=self.days + other.days,
+                hours=self.hours + other.hours,
+                minutes=self.minutes + other.minutes,
+                seconds=self.seconds + other.seconds,
+            )
+        if isinstance(other, datetime.datetime):
+            # Add years and months.
+            new_year = other.year + self.years + (other.month + self.months - 1) // 12
+            new_month = (other.month + self.months - 1) % 12 + 1
+
+            other_month_last_day = calendar.monthrange(other.year, other.month)[1]
+            new_month_last_day = calendar.monthrange(new_year, new_month)[1]
+            if other.day == other_month_last_day:
+                new_day = new_month_last_day
+            else:
+                new_day = min(other.day, new_month_last_day)
+
+            return (
+                # New date, with years and months added.
+                datetime.datetime(
+                    year=new_year,
+                    month=new_month,
+                    day=new_day,
+                    hour=other.hour,
+                    minute=other.minute,
+                    second=other.second,
+                    tzinfo=other.tzinfo,
+                )
+                # add other TimeDelta stuff.
+                + datetime.timedelta(
+                    seconds=self.seconds,
+                    minutes=self.minutes,
+                    hours=self.hours,
+                    days=self.days,
+                    weeks=self.weeks,
+                )
+            )
+        return NotImplemented
+
+    def __radd__(self, other: datetime.datetime) -> datetime.datetime:
+        return self + other
+
+
+def parse_date(string: str) -> datetime.datetime:
+    return datetime.datetime.fromisoformat(string)
 
 
 class Incident:
@@ -39,10 +152,12 @@ class Incident:
 
 
 class Alert:
-    def __init__(self, ids: Sequence[str | int], created: datetime, resolved: datetime) -> None:
+    def __init__(
+        self, ids: typing.Sequence[str | int], created: datetime.datetime, resolved: datetime.datetime
+    ) -> None:
         self.ids: list[str] = [str(id_) for id_ in ids]
-        self.created: datetime = created
-        self.resolved: datetime = resolved
+        self.created: datetime.datetime = created
+        self.resolved: datetime.datetime = resolved
 
     def total_seconds(self) -> float:
         return (self.resolved - self.created).total_seconds()
@@ -64,50 +179,46 @@ class Alert:
 
 # Call PageDuty API.
 # Handles repeating errors and pagination.
-# Extracts all items for a given collector_key.
+# Extract all items for a given collector_key.
 def call_pagerduty_api(
     call_id: str,
     session: requests.Session,
     api_token: str,
     url: str,
-    params: dict,
+    params: dict[str, typing.Any],
     collector_key: str,
     offset: int = 0,
     retry: int = 0,
-) -> list[dict]:
+) -> list[dict[str, typing.Any]]:
     logging.info("call_pagerduty_api(%s, %s, %s)", call_id, offset, retry)
 
-    response = None
-    try:
-        params_with_pagination = {**params, "limit": 100, "offset": offset}
-        headers = {"Accept": "application/vnd.pagerduty+json;version=2", "Authorization": f"Token token={api_token}"}
+    params_with_pagination = {**params, "limit": 100, "offset": offset}
+    headers = {"Accept": "application/vnd.pagerduty+json;version=2", "Authorization": f"Token token={api_token}"}
 
-        response = session.get(url, params=params_with_pagination, headers=headers)
+    response = session.get(url, params=params_with_pagination, headers=headers)
 
-        if response.status_code != 200:
-            if retry < 3:
-                logging.info("response.status_code is %s, != 200, repeating", response.status_code)
-                # https://v2.developer.pagerduty.com/docs/rate-limiting
-                if response.status_code == 429:
-                    time.sleep(1)
-                return call_pagerduty_api(call_id, session, api_token, url, params, collector_key, offset, retry + 1)
-            msg = f"response.status_code is {response.status_code}, != 200"
-            raise requests.HTTPError(msg)
+    if response.status_code != 200:
+        if retry < 3:
+            logging.info("response.status_code is %s, != 200, repeating", response.status_code)
+            # https://v2.developer.pagerduty.com/docs/rate-limiting
+            if response.status_code == 429:
+                time.sleep(1)
+            return call_pagerduty_api(call_id, session, api_token, url, params, collector_key, offset, retry + 1)
+        msg = f"response.status_code is {response.status_code}, != 200"
+        raise requests.HTTPError(msg)
 
-        result = []
-        api_response = response.json()
-        result.extend(api_response[collector_key])
+    result = []
 
-        # https://v2.developer.pagerduty.com/docs/pagination
-        if api_response["more"]:
-            next_offset = api_response["offset"] + len(api_response[collector_key])
-            more_results = call_pagerduty_api(call_id, session, api_token, url, params, collector_key, next_offset, 0)
-            result.extend(more_results)
+    api_response = response.json()
+    result.extend(api_response[collector_key])
 
-        return result
-    finally:
-        if response is not None:
-            response.close()
+    # https://v2.developer.pagerduty.com/docs/pagination
+    if api_response["more"]:
+        next_offset = api_response["offset"] + len(api_response[collector_key])
+        more_results = call_pagerduty_api(call_id, session, api_token, url, params, collector_key, next_offset, 0)
+        result.extend(more_results)
+
+    return result
 
 
 # https://developer.pagerduty.com/api-reference/reference/REST/openapiv3.json/paths/~1incidents/get
@@ -115,8 +226,8 @@ def call_pagerduty_list_incidents(
     session: requests.Session,
     api_token: str,
     service_ids: list[str],
-    start_date: datetime,
-    end_date: datetime,
+    start_date: datetime.datetime,
+    end_date: datetime.datetime,
 ) -> list[Incident]:
     api_incidents = call_pagerduty_api(
         f"https://api.pagerduty.com/incidents,since={start_date.isoformat()},until={end_date.isoformat()}",
@@ -134,13 +245,14 @@ def call_pagerduty_list_incidents(
         "incidents",
     )
 
-    incidents = []
-    for api_incident in api_incidents:
-        incident_id = api_incident["id"]
-        incident_title = api_incident["title"].replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
-        incident_priority = api_incident["priority"]["summary"] if api_incident["priority"] else None
-        incident = Incident(incident_id, incident_title, incident_priority)
-        incidents.append(incident)
+    incidents = [
+        Incident(
+            api_incident["id"],
+            api_incident["title"].replace("\t", " ").replace("\r", " ").replace("\n", " ").strip(),
+            api_incident["priority"]["summary"] if api_incident.get("priority") else None,
+        )
+        for api_incident in api_incidents
+    ]
 
     return incidents
 
@@ -149,12 +261,12 @@ def call_pagerduty_list_incidents(
 def call_pagerduty_list_alerts_for_an_incident(
     cache: Cache, session: requests.Session, api_token: str, incident_id: str
 ) -> list[Alert]:
-    # Method result are considered stable and cached on disk.
-    # Script is processing only resolved incidents.
+    # Method result is considered stable and cached on disk.
+    # Script process only resolved incidents.
     cache_item_id = f"alerts_for_an_incident-{incident_id}"
 
     if cache_item_id in cache:
-        return cache.get(cache_item_id)
+        return cache.get(cache_item_id, list[Alert])
 
     api_alerts = call_pagerduty_api(
         f"https://api.pagerduty.com/incidents/{incident_id}/alerts",
@@ -178,7 +290,7 @@ def call_pagerduty_list_alerts_for_an_incident(
     return alerts
 
 
-# Find all alerts which overlap, and merge them.
+# Find all alerts that overlap, and merge them.
 # The resulting list includes only unique alerts that times do not overlap.
 # Note: "alerts" array must be sorted by "created asc".
 def merge_overlapping_alerts(alerts: list[Alert]) -> list[Alert]:
@@ -217,80 +329,73 @@ def merge_two_alerts(alert_a: Alert, alert_b: Alert) -> Alert:
 
 
 # Filter alerts, return the ones in the interval [start_date, end_date).
-# Note: Alert "created" date is compared.
-def filter_alerts(start_date: datetime, end_date: datetime, all_alerts: list[Alert]) -> list[Alert]:
-    try:
-        first_matching_index = next(i for i, v in enumerate(all_alerts) if v.created >= start_date)
-    except StopIteration:
-        first_matching_index = len(all_alerts)
-    try:
-        first_mismatched_index = next(i for i, v in enumerate(all_alerts) if v.created >= end_date)
-    except StopIteration:
-        first_mismatched_index = len(all_alerts)
-
+# Note: Alert "created" date is compared.py
+def filter_alerts(start_date: datetime.datetime, end_date: datetime.datetime, all_alerts: list[Alert]) -> list[Alert]:
+    first_matching_index = next((i for i, v in enumerate(all_alerts) if v.created >= start_date), len(all_alerts))
+    first_mismatched_index = next((i for i, v in enumerate(all_alerts) if v.created >= end_date), len(all_alerts))
     return all_alerts[first_matching_index:first_mismatched_index]
 
 
-# Print final report about uptime.
+# Print the final report about uptime.
 def report_uptime(
-    start_date: datetime, end_date: datetime, interval_alerts: list[Alert], report_details_level: int
+    start_date: datetime.datetime, end_date: datetime.datetime, interval_alerts: list[Alert], report_details_level: int
 ) -> None:
-    interval_alerts_len = len(interval_alerts)
     interval_duration = (end_date - start_date).total_seconds()
     interval_downtime = sum(alert.total_seconds() for alert in interval_alerts)
     interval_uptime = (1 - (interval_downtime / interval_duration)) * 100
-    interval_mttr = interval_downtime / interval_alerts_len if interval_alerts_len > 0 else 0
+    interval_mttr = interval_downtime / len(interval_alerts) if interval_alerts else 0
     interval_ids = [alert.ids if len(alert.ids) > 1 else alert.ids[0] for alert in interval_alerts]
-    end_date_inclusive = end_date - relativedelta(seconds=1)
+    end_date_inclusive = end_date - datetime.timedelta(seconds=1)
 
-    report_msg = ""
-    if report_details_level == 0:
-        report_msg = "From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Mttr: {: >8}"
-    elif report_details_level == 1:
-        report_msg = "From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Mttr: {: >8} Incidents: {}"
+    report_formats = [
+        "From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Mttr: {: >8}",
+        "From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Mttr: {: >8} Incidents: {}",
+    ]
 
     logging.warning(
         "%s",
-        report_msg.format(
+        report_formats[report_details_level].format(
             start_date.isoformat(),
             end_date_inclusive.isoformat(),
             interval_uptime,
             len(interval_alerts),
-            str(timedelta(seconds=interval_downtime)),
-            str(timedelta(seconds=int(interval_mttr))),
+            str(datetime.timedelta(seconds=interval_downtime)),
+            str(datetime.timedelta(seconds=int(interval_mttr))),
             interval_ids,
         ),
     )
 
 
 # Function that checks if an incident indicates a service outage.
-# Incidents generated by StatusCake starts with "Website | Your site".
+# Incidents generated by StatusCake start with "Website | Your site".
 def is_outage(
-    title_checks: list[Pattern[str]] | None,
+    title_checks: list[re.Pattern[str]] | None,
     title: str,
     priority_checks: list[str] | None,
     priority: str | None,
 ) -> bool:
-    result = True
     if title_checks:
-        result = result and any(title_check.search(title) for title_check in title_checks)
+        if not any(title_check.search(title) for title_check in title_checks):
+            return False
     if priority_checks:
-        result = result and any(priority_check == priority for priority_check in priority_checks)
-    return result
+        if not any(priority_check == priority for priority_check in priority_checks):
+            return False
+    return True
 
 
-# Generate sub-intervals from start_date (inclusive) to end_date (exclusive) with relative_delta step.
-# Example: start_date=2019-01-01, end_date=2020-01-01, relative_delta=6months will return two sub-intervals:
+# Generate intervals from start_date (inclusive) to end_date (exclusive) with time_delta step.
+# Example: start_date=2019-01-01, end_date=2020-01-01,
+# time_delta=6months will return two intervals:
 #          [2019-01-01 00:00:00, 2019-07-01 00:00:00)
 #          [2019-07-01 00:00:00, 2020-01-01 00:00:00)
 def intervals_gen(
-    start_date: datetime, end_date: datetime, relative_delta: relativedelta
-) -> Iterator[tuple[datetime, datetime]]:
+    start_date: datetime.datetime, end_date: datetime.datetime, time_delta: TimeDelta
+) -> typing.Iterator[tuple[datetime.datetime, datetime.datetime]]:
     # This could be simpler, but then the "end of month" case would be broken.
     # Please see test TestIntervalsGen.test7.
     for n in itertools.count():
-        interval_since = start_date + (relative_delta * n)
-        interval_until = min(start_date + (relative_delta * (n + 1)), end_date)
+        interval_since = start_date + (time_delta * n)
+        interval_until = min(start_date + (time_delta * (n + 1)), end_date)
         yield interval_since, interval_until
 
         if interval_until >= end_date:
@@ -299,28 +404,22 @@ def intervals_gen(
 
 def parse_service_id(string: str) -> str:
     match = re.search(r"https://[a-zA-Z0-9.-_]*pagerduty\.com/(?:services|service-directory)/([a-zA-Z0-9]+)", string)
-    if match:
-        return match.group(1)
-    return string
+    return match.group(1) if match else string
 
 
-def parse_relativedelta(string: str) -> relativedelta:
+def parse_time_delta(string: str) -> TimeDelta:
     match = re.match(r"^(\d+) *(hour|day|month|year)s?$", string)
     if match is None:
-        msg = f"Invalid relative data string: {string}."
+        msg = f"Invalid time data string: {string}."
         raise ValueError(msg)
     num = int(match.group(1))
     unit = match.group(2)
-    if unit == "hour":
-        return relativedelta(hours=num)
-    if unit == "day":
-        return relativedelta(days=num)
-    if unit == "month":
-        return relativedelta(months=num)
-    if unit == "year":
-        return relativedelta(years=num)
-    msg = "Should never occur. It's script bug."
-    raise AssertionError(msg)
+    return {
+        "hour": TimeDelta(hours=num),
+        "day": TimeDelta(days=num),
+        "month": TimeDelta(months=num),
+        "year": TimeDelta(years=num),
+    }[unit]
 
 
 def main() -> int:
@@ -352,7 +451,7 @@ def main() -> int:
         required=True,
         help="services for which the script will make calculations, "
         "values can be service ID (e.g., ABCDEF4) "
-        "or service URL (e.g., https://some.pagerduty.com/services/ABCDEF4)",
+        "or service URL (e.g., https://some.pagerduty.com/service-directory/ABCDEF4)",
     )
     argparser.add_argument(
         "--title-checks",
@@ -398,7 +497,7 @@ def main() -> int:
         "--report-step",
         metavar="STEP",
         dest="report_step",
-        type=parse_relativedelta,
+        type=parse_time_delta,
         required=True,
         help="report step, e.g., '14 days', '6 months', '1 year'",
     )
@@ -430,7 +529,7 @@ def main() -> int:
     incidents: list[str] = []
     incidents_filtered_out: list[str] = []
     with requests.Session() as requests_session:
-        collect_step = relativedelta(months=4)
+        collect_step = TimeDelta(months=4)
         for interval_since, interval_until in intervals_gen(args.incidents_since, args.incidents_until, collect_step):
             collected_incidents = call_pagerduty_list_incidents(
                 requests_session,
@@ -448,13 +547,13 @@ def main() -> int:
                     incidents_filtered_out.append(incident.id)
 
     # collect alerts
-    alerts_futures: list[Future[list[Alert]]] = []
+    cache = Cache()
+    alerts_futures: list[concurrent.futures.Future[list[Alert]]] = []
     original_alerts: list[Alert] = []
     simplified_alerts: list[Alert] = []
     merged_alerts: list[Alert]
     with (
-        ThreadPoolExecutor(max_workers=8) as executor,
-        Cache(".cache") as cache,
+        concurrent.futures.thread.ThreadPoolExecutor(max_workers=8) as executor,
         requests.Session() as requests_session,
     ):
         for incident_id in incidents:
@@ -463,7 +562,7 @@ def main() -> int:
             )
             alerts_futures.append(future)
 
-        for alerts_future in futures.as_completed(alerts_futures):
+        for alerts_future in concurrent.futures.as_completed(alerts_futures):
             index = alerts_futures.index(alerts_future)
             incident_id = incidents[index]
             collected_alerts = alerts_future.result()

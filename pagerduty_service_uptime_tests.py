@@ -10,7 +10,7 @@ from pagerduty_service_uptime import (
     merge_overlapping_alerts,
     merge_two_alerts,
     parse_date,
-    parse_relativedelta,
+    parse_time_delta,
 )
 
 
@@ -139,7 +139,7 @@ class TestIntervalsGen(unittest.TestCase):
     def test1(self) -> None:
         intervals = list(
             intervals_gen(
-                parse_date("2019-01-01 00:00:00"), parse_date("2020-01-01 00:00:00"), parse_relativedelta("6 months")
+                parse_date("2019-01-01 00:00:00"), parse_date("2020-01-01 00:00:00"), parse_time_delta("6 months")
             )
         )
         self.assertListEqual(
@@ -153,7 +153,7 @@ class TestIntervalsGen(unittest.TestCase):
     def test2(self) -> None:
         intervals = list(
             intervals_gen(
-                parse_date("2019-01-01 00:00:00"), parse_date("2019-12-31 23:59:59"), parse_relativedelta("6 months")
+                parse_date("2019-01-01 00:00:00"), parse_date("2019-12-31 23:59:59"), parse_time_delta("6 months")
             )
         )
         self.assertListEqual(
@@ -167,7 +167,7 @@ class TestIntervalsGen(unittest.TestCase):
     def test3(self) -> None:
         intervals = list(
             intervals_gen(
-                parse_date("2018-01-01 00:00:00"), parse_date("2020-01-01 00:00:00"), parse_relativedelta("1 year")
+                parse_date("2018-01-01 00:00:00"), parse_date("2020-01-01 00:00:00"), parse_time_delta("1 year")
             )
         )
         self.assertListEqual(
@@ -181,7 +181,7 @@ class TestIntervalsGen(unittest.TestCase):
     def test4(self) -> None:
         intervals = list(
             intervals_gen(
-                parse_date("2018-01-01 00:00:00"), parse_date("2019-01-01 00:00:00"), parse_relativedelta("1 month")
+                parse_date("2018-01-01 00:00:00"), parse_date("2019-01-01 00:00:00"), parse_time_delta("1 month")
             )
         )
         self.assertListEqual(
@@ -205,7 +205,7 @@ class TestIntervalsGen(unittest.TestCase):
     def test5(self) -> None:
         intervals = list(
             intervals_gen(
-                parse_date("2018-01-01 10:00:05"), parse_date("2019-01-01 00:00:00"), parse_relativedelta("1 month")
+                parse_date("2018-01-01 10:00:05"), parse_date("2019-01-01 00:00:00"), parse_time_delta("1 month")
             )
         )
         self.assertListEqual(
@@ -229,7 +229,7 @@ class TestIntervalsGen(unittest.TestCase):
     def test6(self) -> None:
         intervals = list(
             intervals_gen(
-                parse_date("2019-01-01 00:00:00"), parse_date("2020-01-01 00:00:00"), parse_relativedelta("15 months")
+                parse_date("2019-01-01 00:00:00"), parse_date("2020-01-01 00:00:00"), parse_time_delta("15 months")
             )
         )
         self.assertListEqual(
@@ -242,7 +242,7 @@ class TestIntervalsGen(unittest.TestCase):
     def test7(self) -> None:
         intervals = list(
             intervals_gen(
-                parse_date("2025-01-29 00:00:00"), parse_date("2026-01-29 00:00:00"), parse_relativedelta("1 month")
+                parse_date("2025-01-29 00:00:00"), parse_date("2026-01-29 00:00:00"), parse_time_delta("1 month")
             )
         )
         self.assertListEqual(
@@ -269,7 +269,7 @@ class TestIntervalsGen(unittest.TestCase):
     def test8(self) -> None:
         intervals = list(
             intervals_gen(
-                parse_date("2025-01-31 00:00:00"), parse_date("2026-01-31 00:00:00"), parse_relativedelta("1 month")
+                parse_date("2025-01-31 00:00:00"), parse_date("2026-01-31 00:00:00"), parse_time_delta("1 month")
             )
         )
         self.assertListEqual(
