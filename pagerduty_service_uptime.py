@@ -298,7 +298,7 @@ def intervals_gen(
 
 
 def parse_service_id(string: str) -> str:
-    match = re.search(r"https://[a-zA-Z0-9.-_]*pagerduty\.com/services/([a-zA-Z0-9]+)", string)
+    match = re.search(r"https://[a-zA-Z0-9.-_]*pagerduty\.com/(?:services|service-directory)/([a-zA-Z0-9]+)", string)
     if match:
         return match.group(1)
     return string
