@@ -1,9 +1,9 @@
 #!venv/bin/python3
-
 import unittest
 
 from pagerduty_service_uptime import (
     Alert,
+    Filter,
     alerts_overlap,
     filter_alerts,
     intervals_gen,
@@ -461,6 +461,203 @@ class TestFilterAlerts(unittest.TestCase):
             ],
         )
         self.assertListEqual(filtered_alerts, [])
+
+
+class TestFilterClass(unittest.TestCase):
+    def test_parse(self) -> None:
+        cases = [
+            (
+                "priority.summary:matches:P1,P2",
+                Filter(negation=False, path=["priority", "summary"], operator="matches", values=["P1", "P2"]),
+            ),
+            (
+                "some.value.1:matches:P1|P2",
+                Filter(negation=False, path=["some", "value", "1"], operator="matches", values=["P1|P2"]),
+            ),
+            (
+                'title:matches:"test.alert","test,notification"',
+                Filter(negation=False, path=["title"], operator="matches", values=["test.alert", "test,notification"]),
+            ),
+            (
+                "not(title:matches:Test alert,testsite,Test notification)",
+                Filter(
+                    negation=True,
+                    path=["title"],
+                    operator="matches",
+                    values=["Test alert", "testsite", "Test notification"],
+                ),
+            ),
+        ]
+        for i, case in enumerate(cases):
+            filter_str, expected_filter_obj = case
+            with self.subTest(i=i, case=filter_str):
+                self.assertEqual(Filter.parse(filter_str), expected_filter_obj)
+
+    def test_str(self) -> None:
+        cases = [
+            (
+                Filter(negation=False, path=["priority", "summary"], operator="matches", values=["p1", "p2"]),
+                "priority.summary:matches:p1,p2",
+            ),
+            (
+                Filter(
+                    negation=True,
+                    path=["title"],
+                    operator="matches",
+                    values=["test alert", "testsite", "test notification"],
+                ),
+                "not(title:matches:test alert,testsite,test notification)",
+            ),
+        ]
+        for i, case in enumerate(cases):
+            filter_obj, expected_filter_str = case
+            with self.subTest(i=i, case=expected_filter_str):
+                self.assertEqual(str(filter_obj), expected_filter_str)
+
+    def test__get_value(self) -> None:
+        data = {
+            "title": "Non test alert",
+            "priority": {
+                "obj": {},
+                "summary": "P1",
+                "nullable": None,
+                "details": {"key": {"key": "value"}},
+            },
+            "arr": [{"key": "value"}, 10, "test"],
+            "id": 11,
+            "score": 15.4,
+            "empty": "",
+            "bool": True,
+        }
+
+        cases = [
+            ("title", "Non test alert"),
+            ("priority.obj", {}),
+            ("priority.summary", "P1"),
+            ("priority.nullable", None),
+            ("priority.details.key.key", "value"),
+            ("arr", data["arr"]),
+            ("arr.-1", None),
+            ("arr.0", {"key": "value"}),
+            ("arr.0.key", "value"),
+            ("arr.1", 10),
+            ("arr.2", "test"),
+            ("arr.3", None),
+            ("id", 11),
+            ("score", 15.4),
+            ("empty", ""),
+            ("bool", True),
+            ("", data),
+            (".", data),
+        ]
+
+        for i, case in enumerate(cases):
+            path, expected_value = case
+            with self.subTest(i=i, case=path):
+                filter_str = f"{path}:matches:test"
+                filter_obj = Filter.parse(filter_str)
+                self.assertEqual(filter_obj._get_value(data), expected_value)
+
+    def test_check(self) -> None:
+        data = {
+            "title": "Non Test alert",
+            "priority": {
+                "obj": {},
+                "summary": "P1",
+                "nullable": None,
+                "details": {"key": {"key": "value"}},
+            },
+            "arr": [{"key": "value"}, 10, "test"],
+            "emptyArr": [],
+            "id": 11,
+            "score": 15.4,
+            "empty": "",
+            "boolTrue": True,
+            "boolFalse": False,
+            "zero": 0,
+        }
+
+        cases = [
+            # The path exists, the value is a string.
+            ("priority.summary:matches", True),
+            ("priority.summary:matches:^P1$,^P2$", True),
+            ("priority.summary:matches:^P3$", False),
+            ("priority.summary:matches:^P1|P2$", True),
+            ("title:matches:Test alert,testsite,Test notification", True),
+            ("not(title:matches:Test alert,testsite,Test notification)", False),
+            # The path exists, the value is a false-like value - empty string.
+            ("empty:matches", False),
+            ("empty:matches:", False),
+            ("empty:matches:.", False),
+            # The path exists, the value is an integer.
+            ("id:matches", True),
+            ("id:matches:", True),
+            ("id:matches:.", True),
+            ("id:matches:11", True),
+            ("id:matches:1", True),
+            ("id:matches:^1$", False),
+            ("id:matches:^11$", True),
+            # The path exists, the value is false-like value - zero.
+            ("zero:matches", False),
+            ("zero:matches:", False),
+            ("zero:matches:.", True),
+            ("zero:matches:0", True),
+            ("zero:matches:1", False),
+            # The path exists, the value is a float.
+            ("score:matches", True),
+            ("score:matches:", True),
+            ("score:matches:.", True),
+            ("score:matches:15.", True),
+            ("score:matches:^15\\.4$", True),
+            ("score:matches:^15$", False),
+            # The path exists, the value is a bool.
+            ("boolTrue:matches", True),
+            ("boolTrue:matches:", True),
+            ("boolTrue:matches:.", True),
+            ("boolTrue:matches:true", True),
+            ("boolTrue:matches:false", False),
+            ("boolTrue:matches:0", False),
+            # The path exists, the value is false-like value - false.
+            ("boolFalse:matches", False),
+            ("boolFalse:matches:", False),
+            ("boolFalse:matches:.", True),
+            ("boolFalse:matches:false", True),
+            ("boolFalse:matches:true", False),
+            ("boolFalse:matches:0", False),
+            # The path exists, the value is a dict.
+            ("priority.details:matches", True),
+            ("priority.details:matches:", True),
+            ("priority.details:matches:.", True),
+            ('priority.details:matches:"value"', True),
+            ('priority.details:matches:"value0"', False),
+            # The path exists, the value is a false-like value - empty dict.
+            ("priority.obj:matches", False),
+            ("priority.obj:matches:", False),
+            ("priority.obj:matches:.", True),
+            # The path exists, the value is a list.
+            ("arr:matches", True),
+            ("arr:matches:", True),
+            ("arr:matches:.", True),
+            ('arr:matches:"test"', True),
+            ('arr:matches:"test0"', False),
+            # The path exists, the value is a false-like value - empty list.
+            ("emptyArr:matches", False),
+            ("emptyArr:matches:", False),
+            ("emptyArr:matches:.", True),
+            # The path exists, the value is a false-like value - null.
+            ("priority.nullable:matches", False),
+            ("priority.nullable:matches:", False),
+            ("priority.nullable:matches:.", True),
+            # The path does not exist.
+            ("the.path.does.not.exist:matches", False),
+            ("the.path.does.not.exist:matches:", False),
+            ("the.path.does.not.exist:matches:.", True),
+        ]
+        for i, case in enumerate(cases):
+            filter_str, expected_result = case
+            with self.subTest(i=i, case=case):
+                filter_obj = Filter.parse(filter_str)
+                self.assertEqual(filter_obj.check(str(case), data), expected_result)
 
 
 if __name__ == "__main__":

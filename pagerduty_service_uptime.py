@@ -7,10 +7,12 @@ import calendar
 import concurrent
 import concurrent.futures
 import concurrent.futures.thread
+import csv
 import dataclasses
 import datetime
-import functools
+import io
 import itertools
+import json
 import logging
 import os
 import pathlib
@@ -26,7 +28,7 @@ import requests
 if typing.TYPE_CHECKING:
     import types
 
-VERSION = "2025-02-22"
+VERSION = "2025-02-28"
 
 
 class Cache:
@@ -52,13 +54,13 @@ class Cache:
 
     def __exit__(
         self,
-        type_: type[BaseException] | None,
+        type0: type[BaseException] | None,
         value: BaseException | None,
         traceback: types.TracebackType | None,
     ) -> None:
         with self.rlock:
-            if type_ and value:
-                logging.error("Exception in Cache.__exit__", exc_info=(type_, value, traceback))
+            if type0 and value:
+                logging.error("Exception in Cache.__exit__", exc_info=(type0, value, traceback))
             if self.cache is None:
                 msg = f"Cache already closed: {self.cache_location}."
                 raise RuntimeError(msg)
@@ -91,7 +93,102 @@ class Cache:
             return key in self.cache
 
 
-# date.timedelta, but with support for months and years.
+# Filter list[data], based on specified criteria.
+#   Filter syntax:
+#     path:operator:values
+#     not(path:operator:values)
+#   Attributes:
+#     path      - A dot-separated identifier in the item structure
+#     operator  - The action to perform, specifically 'matches'.
+#     values    - A list of comma-separated patterns for matching.
+# Examples:
+#     priority.summary:matches:P1,P2
+#     integration.summary:matches:StatusCake,AlertSite,Grafana
+#     not(title:matches:Test alert,testsite,Test notification)
+#     integration.summary:matches
+#     obj.matches:expectedValue
+#     obj.array:matches:expectedValue
+#     obj.array[0].matches:expectedValue
+@dataclasses.dataclass(frozen=True)
+class Filter:
+    negation: bool
+    path: list[str]
+    operator: typing.Literal["matches"]
+    values: list[str]
+
+    def __str__(self) -> str:
+        result = f"{'.'.join(self.path)}:{self.operator}:{','.join(self.values)}"
+        if self.negation:
+            result = f"not({result})"
+        return result
+
+    def __repr__(self) -> str:
+        return f"Filter(not={self.negation}, path={self.path}, operator={self.operator}, values={self.values})"
+
+    @classmethod
+    def parse(cls, filter_str: str) -> Filter:
+        negation = filter_str.startswith("not(") and filter_str.endswith(")")
+        if negation:
+            filter_str = filter_str[4:-1]
+
+        try:
+            path_str, operator_str, values_str = filter_str.split(":", 2)
+        except ValueError:
+            path_str, operator_str = filter_str.split(":")
+            values_str = ""
+
+        if operator_str != "matches":
+            msg = f"Invalid filter string: {filter_str}"
+            raise ValueError(msg)
+
+        path = path_str.split(".") if path_str not in {"", "."} else []
+        operator = typing.cast(typing.Literal["matches"], operator_str)
+        values = next((csv.reader(io.StringIO(values_str), dialect="unix")), [])
+
+        return cls(negation, path, operator, values)
+
+    def check(self, check_key: str, data: dict[str, typing.Any]) -> bool:
+        check_value = self._get_value(data)
+        if isinstance(check_value, list | dict | bool):
+            check_value_str = json.dumps(check_value, separators=(",", ":"))
+        else:
+            check_value_str = str(check_value)
+
+        if self.values:
+            result = any(re.search(v, check_value_str) for v in self.values)
+        else:
+            result = bool(check_value)
+
+        if self.negation:
+            result = not result
+
+        if not result:
+            logging.info(
+                "Filter.check(%s)=%s for id=%s, check_key=%s, check_value_str=%s",
+                self,
+                data.get("id"),
+                result,
+                check_key,
+                check_value_str,
+            )
+
+        return result
+
+    # Retrieve the value from the nested dictionary based on the specified path.
+    # Returns None if the path does not exist.
+    def _get_value(self, data: dict[str, typing.Any]) -> typing.Any:
+        value: typing.Any = data
+        for key in self.path:
+            if isinstance(value, dict):
+                value = value.get(key)
+            elif isinstance(value, list) and key.isdigit() and len(value) > int(key):
+                value = value[int(key)]
+            else:
+                return None
+        return value
+
+
+# Extends datetime.timedelta to support months and years.
 @dataclasses.dataclass(frozen=True)
 class TimeDelta:
     years: int = 0
@@ -104,10 +201,10 @@ class TimeDelta:
 
     def __str__(self) -> str:
         parts = [f"{field}={value}" for field, value in vars(self).items() if value]
-        return f"TimeDelta({', '.join(parts)})"
+        return f"{', '.join(parts)}"
 
     def __repr__(self) -> str:
-        return str(self)
+        return f"TimeDelta({self})"
 
     # Support [TimeDelta(months=<n>) * int(<k>)] math, useful in loops.
     def __mul__(self, other: int) -> TimeDelta:
@@ -127,14 +224,9 @@ class TimeDelta:
     def __add__(self, other: TimeDelta | datetime.datetime) -> TimeDelta | datetime.datetime:
         if isinstance(other, TimeDelta):
             return TimeDelta(
-                years=self.years + other.years,
-                months=self.months + other.months,
-                weeks=self.weeks + other.weeks,
-                days=self.days + other.days,
-                hours=self.hours + other.hours,
-                minutes=self.minutes + other.minutes,
-                seconds=self.seconds + other.seconds,
+                **{field: (getattr(self, field) + getattr(other, field)) for field, value in vars(self).items()}
             )
+
         if isinstance(other, datetime.datetime):
             # Add years and months.
             new_year = other.year + self.years + (other.month + self.months - 1) // 12
@@ -148,7 +240,7 @@ class TimeDelta:
                 new_day = min(other.day, new_month_last_day)
 
             return (
-                # New date, with years and months added.
+                # Create a new date by adding the specified number of years and months.
                 datetime.datetime(
                     year=new_year,
                     month=new_month,
@@ -158,7 +250,7 @@ class TimeDelta:
                     second=other.second,
                     tzinfo=other.tzinfo,
                 )
-                # add other TimeDelta stuff.
+                # Add other TimeDelta components to the new date.
                 + datetime.timedelta(
                     seconds=self.seconds,
                     minutes=self.minutes,
@@ -173,30 +265,36 @@ class TimeDelta:
         return self + other
 
 
-def parse_date(string: str) -> datetime.datetime:
-    return datetime.datetime.fromisoformat(string)
+def parse_date(date_str: str) -> datetime.datetime:
+    return datetime.datetime.fromisoformat(date_str)
 
 
-def parse_time_delta(string: str) -> TimeDelta:
-    match = re.match(r"^(\d+) *(hour|day|month|year)s?$", string)
+def parse_time_delta(delta_str: str) -> TimeDelta:
+    match = re.match(r"^(\d+) *(hour|day|month|year)s?$", delta_str)
     if not match:
-        msg = f"Invalid time data string: {string}."
+        msg = f"Invalid time data string: {delta_str}."
         raise ValueError(msg)
-    num = int(match.group(1))
-    unit = match.group(2)
-    return TimeDelta(**{unit + "s": num})
+    num, unit = int(match.group(1)), match.group(2)
+    return TimeDelta(**{f"{unit}s": num})
 
 
-def parse_service_id(string: str) -> str:
-    match = re.search(r"https://[a-zA-Z0-9.-_]*pagerduty\.com/(?:services|service-directory)/([a-zA-Z0-9]+)", string)
-    return match.group(1) if match else string
+def extract_pagerduty_service_id(value: str) -> str:
+    match = re.search(r"https://[a-zA-Z0-9.-_]*pagerduty\.com/(?:services|service-directory)/([a-zA-Z0-9]+)", value)
+    if match:
+        return match.group(1)
+    return value
 
 
 @dataclasses.dataclass(frozen=True)
 class Incident:
     id: str
-    title: str
-    priority: str | None
+    raw_data: dict[str, typing.Any] | None = None
+
+    def __str__(self) -> str:
+        return f"({self.id})"
+
+    def __repr__(self) -> str:
+        return f"Incident{self}"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -204,6 +302,7 @@ class Alert:
     ids: list[str | int]
     created: datetime.datetime
     resolved: datetime.datetime
+    raw_data: dict[str, typing.Any] | None = None
 
     def total_seconds(self) -> float:
         return (self.resolved - self.created).total_seconds()
@@ -212,10 +311,10 @@ class Alert:
         return f"({self.ids},{self.created.isoformat()},{self.resolved.isoformat()})"
 
     def __repr__(self) -> str:
-        return str(self)
+        return f"Alert{self}"
 
 
-# Call PageDuty API.
+# Function to call the PagerDuty API.
 # Handles repeating errors and pagination.
 # Extract all items for a given collector_key.
 def call_pagerduty_api(
@@ -230,15 +329,14 @@ def call_pagerduty_api(
     # https://developer.pagerduty.com/docs/versioning
     headers = {"Accept": "application/vnd.pagerduty+json;version=2", "Authorization": f"Token token={api_token}"}
 
-    result = []
+    results = []
     offset = 0
-    retry = 0
-    max_retries = 3
+    retry, max_retries = 0, 3
     while True:
         logging.info("call_pagerduty_api(call_id=%s, offset=%s, retry=%s)", call_id, offset, retry)
 
         params_with_pagination = {**params, "limit": 100, "offset": offset}
-        response = session.get(url, params=params_with_pagination, headers=headers)
+        response: requests.Response = session.get(url, params=params_with_pagination, headers=headers)
 
         if response.status_code != requests.codes.ok:
             if retry < max_retries:
@@ -258,16 +356,16 @@ def call_pagerduty_api(
             raise requests.HTTPError(msg)
 
         api_response = response.json()
-        result.extend(api_response[collector_key])
+        results.extend(api_response[collector_key])
 
         # https://v2.developer.pagerduty.com/docs/pagination
-        if not api_response["more"]:
+        if not api_response.get("more", False):
             break
 
         offset = api_response["offset"] + len(api_response[collector_key])
         retry = 0
 
-    return result
+    return results
 
 
 # https://developer.pagerduty.com/api-reference/reference/REST/openapiv3.json/paths/~1incidents/get
@@ -297,8 +395,7 @@ def call_pagerduty_list_incidents(
     return [
         Incident(
             api_incident["id"],
-            api_incident["title"].replace("\t", " ").replace("\r", " ").replace("\n", " ").strip(),
-            api_incident["priority"]["summary"] if api_incident.get("priority") else None,
+            api_incident,
         )
         for api_incident in api_incidents
     ]
@@ -310,10 +407,10 @@ def call_pagerduty_list_alerts_for_an_incident(
 ) -> list[Alert]:
     # Method result is considered stable and cached on disk.
     # Script process only resolved incidents.
-    cache_item_id = f"alerts_for_an_incident-{incident_id}"
+    cache_key = f"alerts_for_an_incident-{incident_id}"
 
-    if cache_item_id in cache:
-        return cache.get(cache_item_id, list[Alert])
+    if cache_key in cache:
+        return cache.get(cache_key, list[Alert])
 
     api_alerts = call_pagerduty_api(
         f"https://api.pagerduty.com/incidents/{incident_id}/alerts",
@@ -329,43 +426,46 @@ def call_pagerduty_list_alerts_for_an_incident(
             [f"{incident_id}/{api_alert['id']}"],
             parse_date(api_alert["created_at"]),
             parse_date(api_alert["resolved_at"]),
+            api_alert,
         )
         for api_alert in api_alerts
     ]
 
-    cache.set(cache_item_id, alerts)
+    cache.set(cache_key, alerts)
     return alerts
 
 
-# Find all alerts that overlap, and merge them.
-# The resulting list includes only unique alerts that times do not overlap.
-# Note: "alerts" array must be sorted by "created asc".
+# Identify and merge any overlapping alerts.
+# The resulting list will contain only unique alerts with non-overlapping times.
+# Note: The "alerts" list must be sorted by the "created" timestamp in ascending order.
 def merge_overlapping_alerts(alerts: list[Alert]) -> list[Alert]:
-    ret: list[Alert] = []
+    merged_alerts: list[Alert] = []
     for alert in alerts:
-        if ret and alerts_overlap(ret[-1], alert):
-            ret[-1] = merge_two_alerts(ret[-1], alert)
+        if merged_alerts and alerts_overlap(merged_alerts[-1], alert):
+            merged_alerts[-1] = merge_two_alerts(merged_alerts[-1], alert)
         else:
-            ret.append(alert)
+            merged_alerts.append(alert)
 
     if "unittest" in sys.modules:
         # Above algorithm should work. Let's check.
-        for i, alert_1 in enumerate(ret):
-            for j, alert_2 in enumerate(ret):
+        for i, alert_1 in enumerate(merged_alerts):
+            for j, alert_2 in enumerate(merged_alerts):
                 if i != j and alerts_overlap(alert_1, alert_2):
                     msg = f"Omg. {i} and {j} ({alert_1} and {alert_2}) overlaps! It's script bug."
                     raise AssertionError(msg)
 
-    return ret
+    return merged_alerts
 
 
-# Function checks whether two alerts overlap.
-# Math: https://nedbatchelder.com/blog/201310/range_overlap_in_two_compares.html
+# This function determines if two alerts overlap.
+# For more information on the mathematical approach used, refer to:
+# https://nedbatchelder.com/blog/201310/range_overlap_in_two_compares.html
 def alerts_overlap(alert_a: Alert, alert_b: Alert) -> bool:
     return alert_a.resolved >= alert_b.created and alert_b.resolved >= alert_a.created
 
 
-# "Merge" means interval of new alert is union of intervals (of two input *overlapping* alerts).
+# "Merge" means the interval of the new alert is the union of the intervals
+# (of the two input overlapping alerts).
 def merge_two_alerts(alert_a: Alert, alert_b: Alert) -> Alert:
     logging.debug("merge_two_alerts(%s,%s)", alert_a, alert_b)
     return Alert(
@@ -375,28 +475,25 @@ def merge_two_alerts(alert_a: Alert, alert_b: Alert) -> Alert:
     )
 
 
-# Filter alerts, return the ones in the interval [start_date, end_date).
-# Note: Alert "created" date is compared.
+# Filters the list of alerts and returns those that fall within the specified interval [start_date, end_date).
+# Note: The comparison is based on the "created" timestamp of the alerts.
 def filter_alerts(start_date: datetime.datetime, end_date: datetime.datetime, all_alerts: list[Alert]) -> list[Alert]:
     return [alert for alert in all_alerts if start_date <= alert.created < end_date]
 
 
-# Function that checks if an incident indicates a service outage.
-# Incidents generated by StatusCake start with "Website | Your site".
+# Function to determine if an incident/alert qualifies as a service outage.
 def is_outage(
-    title_checks: list[re.Pattern[str]] | None,
-    title: str,
-    priority_checks: list[str] | None,
-    priority: str | None,
+    check_key: str,
+    filters: list[Filter],
+    data: dict[str, typing.Any],
 ) -> bool:
-    title_matches = not title_checks or any(check.search(title) for check in title_checks)
-    priority_matches = not priority_checks or priority in priority_checks
-    return title_matches and priority_matches
+    return all(filter0.check(check_key, data) for filter0 in filters)
 
 
-# Generate intervals from start_date (inclusive) to end_date (exclusive) with time_delta step.
-# Example: start_date=2019-01-01, end_date=2020-01-01,
-# time_delta=6months will return two intervals:
+# Generate intervals from the start_date (inclusive) to the end_date (exclusive) using the specified time_delta step.
+# Example:
+#   start_date=2019-01-01 end_date=2020-01-01 time_delta=6 months
+# will generate the following intervals:
 #          [2019-01-01 00:00:00, 2019-07-01 00:00:00)
 #          [2019-07-01 00:00:00, 2020-01-01 00:00:00)
 def intervals_gen(
@@ -420,22 +517,23 @@ class Args:
     log_level: str
     api_token: str
     service_ids: list[str]
-    title_checks: list[re.Pattern[str]]
-    priority_checks: list[str]
+    incident_filters: list[Filter]
+    alert_filters: list[Filter]
     incidents_since: datetime.datetime
     incidents_until: datetime.datetime
     report_step: TimeDelta
     report_details_level: int
 
 
-# Retrieve incidents from the PagerDuty service based on the provided arguments.
-# :return: tuple of lists: collected, filtered_out.
+# Fetch incidents from the PagerDuty service using the provided args.
+# :return: tuple[collected, spurned]
 def collect_incidents(
     args: Args,
     session: requests.Session,
 ) -> tuple[list[Incident], list[Incident]]:
     collected: list[Incident] = []
-    filtered_out: list[Incident] = []
+    spurned: list[Incident] = []
+
     collect_step = TimeDelta(months=4)
     for interval_since, interval_until in intervals_gen(args.incidents_since, args.incidents_until, collect_step):
         pagerduty_incidents = call_pagerduty_list_incidents(
@@ -447,53 +545,73 @@ def collect_incidents(
         )
 
         for incident in pagerduty_incidents:
-            if is_outage(args.title_checks, incident.title, args.priority_checks, incident.priority):
+            if incident.raw_data and is_outage("incidents", args.incident_filters, incident.raw_data):
                 collected.append(incident)
             else:
-                filtered_out.append(incident)
-    return collected, filtered_out
+                spurned.append(incident)
+
+    return collected, spurned
 
 
-# Retrieve alerts from the PagerDuty service based on the provided arguments.
-# :return: tuple of lists: collected, simplified, merged.
+# Fetch alerts from the PagerDuty service using the provided incidents.
+# :return: tuple[collected, spurned, simplified, merged]
 def collect_and_merge_alerts(
     args: Args,
     session: requests.Session,
     cache: Cache,
     incidents: list[Incident],
-) -> tuple[list[Alert], list[Alert], list[Alert]]:
+) -> tuple[list[Alert], list[Alert], list[Alert], list[Alert]]:
     collected: list[Alert] = []
+    spurned: list[Alert] = []
     simplified: list[Alert] = []
+
+    def alert_sort_key(alert0: Alert) -> tuple[datetime.datetime, float]:
+        return alert0.created, -alert0.total_seconds()
 
     max_workers = min(8, os.cpu_count() or 1)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(call_pagerduty_list_alerts_for_an_incident, cache, session, args.api_token, incident.id)
+        future_to_incident = {
+            executor.submit(
+                call_pagerduty_list_alerts_for_an_incident, cache, session, args.api_token, incident.id
+            ): incident
             for incident in incidents
-        ]
+        }
 
-    for index, future in enumerate(concurrent.futures.as_completed(futures)):
-        f_collected = future.result()
-        f_collected.sort(key=lambda alert: (alert.created, -alert.total_seconds()))
+    for future in concurrent.futures.as_completed(future_to_incident):
+        incident = future_to_incident[future]
+        alerts_for_incident = future.result()
+        alerts_for_incident.sort(key=alert_sort_key)
 
-        f_merged = merge_overlapping_alerts(f_collected)
-        if len(f_merged) == 1:
-            f_merged[0] = Alert(
-                ids=[incidents[index].id],
-                created=f_merged[0].created,
-                resolved=f_merged[0].resolved,
+        collected_for_incident: list[Alert] = []
+        spurned_for_incident: list[Alert] = []
+        for alert in alerts_for_incident:
+            if alert.raw_data and is_outage("alerts", args.alert_filters, alert.raw_data):
+                collected_for_incident.append(alert)
+            else:
+                spurned_for_incident.append(alert)
+
+        merged_for_incident = merge_overlapping_alerts(collected_for_incident)
+        if len(merged_for_incident) == 1 and not spurned_for_incident:
+            merged_for_incident[0] = Alert(
+                ids=[incident.id],
+                created=merged_for_incident[0].created,
+                resolved=merged_for_incident[0].resolved,
             )
 
-        collected.extend(f_collected)
-        simplified.extend(f_merged)
+        collected.extend(collected_for_incident)
+        spurned.extend(spurned_for_incident)
+        simplified.extend(merged_for_incident)
 
-    simplified.sort(key=lambda alert: (alert.created, -alert.total_seconds()))
+    collected.sort(key=alert_sort_key)
+    spurned.sort(key=alert_sort_key)
+    simplified.sort(key=alert_sort_key)
+
     merged = merge_overlapping_alerts(simplified)
 
-    return collected, simplified, merged
+    return collected, spurned, simplified, merged
 
 
-# Print the final report about uptime.
+# Generate and display the final uptime report.
 def report_uptime(
     start_date: datetime.datetime,
     end_date: datetime.datetime,
@@ -502,7 +620,7 @@ def report_uptime(
 ) -> None:
     duration = (end_date - start_date).total_seconds()
     downtime = sum(alert.total_seconds() for alert in alerts)
-    uptime = (1 - (downtime / duration)) * 100
+    uptime = (1 - (downtime / duration)) * 100 if duration else 100
     mttr = downtime / len(alerts) if alerts else 0
     ids = [alert.ids if len(alert.ids) > 1 else alert.ids[0] for alert in alerts]
     end_date_inclusive = end_date - datetime.timedelta(seconds=1)
@@ -530,7 +648,9 @@ def report_uptime(
 # usage: argument_parser.add_argument(..., **environ_or_required("ENV_VAR")))
 def environ_or_required(key: str) -> dict[str, typing.Any]:
     value = os.environ.get(key)
-    return {"default": value} if value else {"required": True}
+    if value:
+        return {"default": value}
+    return {"required": True}
 
 
 def main() -> int:
@@ -559,7 +679,7 @@ def main() -> int:
         "--service-ids",
         metavar="SERVICE_ID",
         dest="service_ids",
-        type=parse_service_id,
+        type=extract_pagerduty_service_id,
         nargs="+",
         required=True,
         help=(
@@ -568,30 +688,50 @@ def main() -> int:
             "service URL (e.g., https://some.pagerduty.com/service-directory/ABCDEF4)."
         ),
     )
+    filters_doc = (
+        "Filter Syntax: path:operator:patterns, not(path:operator:patterns)\n"
+        "  - path: A dot-separated identifier in the item structure.\n"
+        "  - operator: The action to perform, specifically 'matches'.\n"
+        "  - patterns: A list of comma-separated patterns for matching.\n"
+        "To qualify an item as downtime:\n"
+        "  - All specified filters must match the item (AND condition).\n"
+        "  - For each filter, at least one pattern must match the item (OR condition).\n"
+        "If no filters are provided, all items are treated as downtime.\n"
+        "Examples:\n"
+        "  - 'integration.summary:matches:StatusCake,AlertSite'\n"
+        "  - 'integration.summary:matches'\n"
+        "  - 'not(integration.summary:matches)'\n"
+        "Special Cases:\n"
+        "  - The expression 'path:matches' indicates that the path exists and has a non-false-like value.\n"
+        "    False-like values include: '', '0', 'false', 'null', '[]', '{}'.\n"
+        "Paths referencing objects will be converted into a compact JSON format for pattern validation."
+    )
     arg_parser.add_argument(
-        "--title-checks",
-        metavar="PATTERN",
-        dest="title_checks",
-        type=functools.partial(re.compile, flags=0),
+        "--incident-filters",
+        metavar="FILTER",
+        dest="incident_filters",
+        type=Filter.parse,
         nargs="*",
         required=False,
+        default=[],
         help=(
-            "Regular expressions for matching titles, e.g., '^Downtime', '^Outage'.\n"
-            "The event title must match any of the provided regular expressions to be considered downtime.\n"
-            "If none are specified, title matching is not used for downtime determination."
+            "Add incidents filter.\n"
+            f"{filters_doc}\n"
+            "Incident structure is described at: https://developer.pagerduty.com/api-reference/9d0b4b12e36f9-list-incidents"
         ),
     )
     arg_parser.add_argument(
-        "--priority-checks",
-        metavar="PRIORITY",
-        dest="priority_checks",
-        type=str,
+        "--alert-filters",
+        metavar="FILTER",
+        dest="alert_filters",
+        type=Filter.parse,
         nargs="*",
         required=False,
+        default=[],
         help=(
-            "Values for checking priority, e.g., 'P1', 'P2'.\n"
-            "The event priority must match any of the specified values to be considered downtime.\n"
-            "If none are specified, priority is not used for downtime determination."
+            "Add alerts filter.\n"
+            f"{filters_doc}\n"
+            "Alert structure is described at: https://developer.pagerduty.com/api-reference/4bc42e7ac0c59-list-alerts-for-an-incident"
         ),
     )
     arg_parser.add_argument(
@@ -644,26 +784,32 @@ def main() -> int:
     logging.info("log_level=%s", args.log_level)
     logging.info("api_token=%s...%s", args.api_token[:3], args.api_token[-3:])
     logging.info("service_ids=%s", args.service_ids)
-    logging.info("title_checks=%s", args.title_checks)
-    logging.info("priority_checks=%s", args.priority_checks)
+    logging.info("incident_filters=%s", args.incident_filters)
+    logging.info("alert_filters=%s", args.alert_filters)
     logging.info("incidents_since=%s", args.incidents_since)
     logging.info("incidents_until=%s", args.incidents_until)
-    logging.info("report_step=%s", args.report_step)
+    logging.info("report_step=%r", args.report_step)
     logging.info("report_details_level=%s", args.report_details_level)
 
     with requests.Session() as session, Cache() as cache:
-        incidents_collected, incidents_filtered_out = collect_incidents(args, session)
-        alerts_collected, alerts_simplified, alerts_merged = collect_and_merge_alerts(
-            args, session, cache, incidents_collected
+        incidents_collected, incidents_spurned = collect_incidents(args, session)
+        alerts_collected, alerts_spurned, alerts_simplified, alerts_merged = collect_and_merge_alerts(
+            args,
+            session,
+            cache,
+            incidents_collected,
         )
 
     logging.info("len(incidents_collected)=%d", len(incidents_collected))
-    logging.info("len(incidents_filtered_out)=%d", len(incidents_filtered_out))
-    logging.debug("incidents_collected=%s", incidents_collected)
-    logging.debug("incidents_filtered_out=%s", incidents_filtered_out)
+    logging.info("len(incidents_spurned)=%d", len(incidents_spurned))
     logging.info("len(alerts_collected)=%d", len(alerts_collected))
+    logging.info("len(alerts_spurned)=%d", len(alerts_spurned))
     logging.info("len(alerts_simplified)=%d", len(alerts_simplified))
     logging.info("len(alerts_merged)=%d", len(alerts_merged))
+
+    logging.debug("incidents_collected=%s", incidents_collected)
+    logging.debug("incidents_spurned=%s", incidents_spurned)
+    logging.debug("alerts_spurned=%s", alerts_spurned)
     logging.debug("alerts_merged=%s", alerts_merged)
 
     for interval_since, interval_until in intervals_gen(args.incidents_since, args.incidents_until, args.report_step):
