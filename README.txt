@@ -20,9 +20,9 @@ Usage example:
         --log-level INFO \
         --api-token "$PAGERDUTY_API_TOKEN" \
         --service-ids "https://some.pagerduty.com/service-directory/ABCDEF4" \
-        --incidents-filters 'priority.summary:equals:P1,P2' \
-        --alert-filters 'integration.summary:contains:StatusCake,AlertSite,Grafana' \
-                        'not(title:contains:Test alert,testsite,Test notification)' \
+        --incident-filters 'priority.summary:matches:P1,P2' \
+        --alert-filters 'integration.summary:matches:StatusCake,AlertSite,Grafana' \
+                        'not(title:matches:Test alert,testsite,Test notification)' \
         --incidents-since "2019-01-01T00:00:00Z" \
         --incidents-until "2020-01-01T00:00:00Z" \
         --report-step "1 month" \

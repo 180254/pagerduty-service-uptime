@@ -28,7 +28,9 @@ import requests
 if typing.TYPE_CHECKING:
     import types
 
-VERSION = "2025-02-28"
+VERSION = "2025-03-30"
+
+logger = logging.getLogger(__name__)
 
 
 class Cache:
@@ -60,7 +62,7 @@ class Cache:
     ) -> None:
         with self.rlock:
             if type0 and value:
-                logging.error("Exception in Cache.__exit__", exc_info=(type0, value, traceback))
+                logger.error("Exception in Cache.__exit__", exc_info=(type0, value, traceback))
             if self.cache is None:
                 msg = f"Cache already closed: {self.cache_location}."
                 raise RuntimeError(msg)
@@ -82,7 +84,7 @@ class Cache:
                 msg = f"Cache not opened: {self.cache_location}."
                 raise RuntimeError(msg)
 
-            return typing.cast(T, self.cache[key])
+            return typing.cast("T", self.cache[key])
 
     def __contains__(self, key: str) -> bool:
         with self.rlock:
@@ -142,7 +144,7 @@ class Filter:
             raise ValueError(msg)
 
         path = path_str.split(".") if path_str not in {"", "."} else []
-        operator = typing.cast(typing.Literal["matches"], operator_str)
+        operator = typing.cast("typing.Literal['matches']", operator_str)
         values = next((csv.reader(io.StringIO(values_str), dialect="unix")), [])
 
         return cls(negation, path, operator, values)
@@ -163,11 +165,11 @@ class Filter:
             result = not result
 
         if not result:
-            logging.info(
+            logger.info(
                 "Filter.check(%s)=%s for id=%s, check_key=%s, check_value_str=%s",
                 self,
-                data.get("id"),
                 result,
+                data.get("id"),
                 check_key,
                 check_value_str,
             )
@@ -333,17 +335,17 @@ def call_pagerduty_api(
     offset = 0
     retry, max_retries = 0, 3
     while True:
-        logging.info("call_pagerduty_api(call_id=%s, offset=%s, retry=%s)", call_id, offset, retry)
+        logger.info("call_pagerduty_api(call_id=%s, offset=%s, retry=%s)", call_id, offset, retry)
 
         params_with_pagination = {**params, "limit": 100, "offset": offset}
         response: requests.Response = session.get(url, params=params_with_pagination, headers=headers)
 
         if response.status_code != requests.codes.ok:
             if retry < max_retries:
-                logging.info("response.status_code is %s, != 200, repeating", response.status_code)
+                logger.info("response.status_code is %s, != 200, repeating", response.status_code)
                 # https://developer.pagerduty.com/docs/rest-api-rate-limits
                 if response.status_code == requests.codes.too_many_requests:
-                    logging.info(
+                    logger.info(
                         "Too Many Requests: limit: %s, remaining: %s, reset: %s",
                         response.headers["ratelimit-limit"],
                         response.headers["ratelimit-remaining"],
@@ -467,7 +469,7 @@ def alerts_overlap(alert_a: Alert, alert_b: Alert) -> bool:
 # "Merge" means the interval of the new alert is the union of the intervals
 # (of the two input overlapping alerts).
 def merge_two_alerts(alert_a: Alert, alert_b: Alert) -> Alert:
-    logging.debug("merge_two_alerts(%s,%s)", alert_a, alert_b)
+    logger.debug("merge_two_alerts(%s,%s)", alert_a, alert_b)
     return Alert(
         ids=alert_a.ids + alert_b.ids,
         created=min(alert_a.created, alert_b.created),
@@ -630,7 +632,7 @@ def report_uptime(
         "From: {} To: {} Uptime: {:6.2f} Incidents: {:3} Downtime: {: >8} Mttr: {: >8} Incidents: {}",
     ]
 
-    logging.warning(
+    logger.warning(
         "%s",
         report_formats[report_details_level].format(
             start_date.isoformat(),
@@ -781,15 +783,15 @@ def main() -> int:
     args = Args(**vars(arg_parser.parse_args()))
 
     logging.basicConfig(stream=sys.stdout, level=args.log_level, format="%(levelname)s %(message)s")
-    logging.info("log_level=%s", args.log_level)
-    logging.info("api_token=%s...%s", args.api_token[:3], args.api_token[-3:])
-    logging.info("service_ids=%s", args.service_ids)
-    logging.info("incident_filters=%s", args.incident_filters)
-    logging.info("alert_filters=%s", args.alert_filters)
-    logging.info("incidents_since=%s", args.incidents_since)
-    logging.info("incidents_until=%s", args.incidents_until)
-    logging.info("report_step=%r", args.report_step)
-    logging.info("report_details_level=%s", args.report_details_level)
+    logger.info("log_level=%s", args.log_level)
+    logger.info("api_token=%s...%s", args.api_token[:3], args.api_token[-3:])
+    logger.info("service_ids=%s", args.service_ids)
+    logger.info("incident_filters=%s", args.incident_filters)
+    logger.info("alert_filters=%s", args.alert_filters)
+    logger.info("incidents_since=%s", args.incidents_since)
+    logger.info("incidents_until=%s", args.incidents_until)
+    logger.info("report_step=%r", args.report_step)
+    logger.info("report_details_level=%s", args.report_details_level)
 
     with requests.Session() as session, Cache() as cache:
         incidents_collected, incidents_spurned = collect_incidents(args, session)
@@ -800,17 +802,17 @@ def main() -> int:
             incidents_collected,
         )
 
-    logging.info("len(incidents_collected)=%d", len(incidents_collected))
-    logging.info("len(incidents_spurned)=%d", len(incidents_spurned))
-    logging.info("len(alerts_collected)=%d", len(alerts_collected))
-    logging.info("len(alerts_spurned)=%d", len(alerts_spurned))
-    logging.info("len(alerts_simplified)=%d", len(alerts_simplified))
-    logging.info("len(alerts_merged)=%d", len(alerts_merged))
+    logger.info("len(incidents_collected)=%d", len(incidents_collected))
+    logger.info("len(incidents_spurned)=%d", len(incidents_spurned))
+    logger.info("len(alerts_collected)=%d", len(alerts_collected))
+    logger.info("len(alerts_spurned)=%d", len(alerts_spurned))
+    logger.info("len(alerts_simplified)=%d", len(alerts_simplified))
+    logger.info("len(alerts_merged)=%d", len(alerts_merged))
 
-    logging.debug("incidents_collected=%s", incidents_collected)
-    logging.debug("incidents_spurned=%s", incidents_spurned)
-    logging.debug("alerts_spurned=%s", alerts_spurned)
-    logging.debug("alerts_merged=%s", alerts_merged)
+    logger.debug("incidents_collected=%s", incidents_collected)
+    logger.debug("incidents_spurned=%s", incidents_spurned)
+    logger.debug("alerts_spurned=%s", alerts_spurned)
+    logger.debug("alerts_merged=%s", alerts_merged)
 
     for interval_since, interval_until in intervals_gen(args.incidents_since, args.incidents_until, args.report_step):
         interval_alerts = filter_alerts(interval_since, interval_until, alerts_merged)
